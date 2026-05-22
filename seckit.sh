@@ -81,34 +81,65 @@ cmd_doctor() {
 }
 
 # Install the scanners via the platform package manager (brew + npm).
+# Asks which of the missing ones to install. Pass --all / -y to skip the prompt.
 cmd_install() {
-  echo "${BOLD}Installing scanners${RST}"
-  local pkgs=() t
-  for t in osv-scanner gitleaks trufflehog semgrep checkov; do
-    have "$t" || pkgs+=("$t")
-  done
-  local need_socket=0; have socket || need_socket=1
+  local yes=0 a
+  for a in "$@"; do case "$a" in --all|-y|--yes) yes=1 ;; esac; done
 
-  if (( ${#pkgs[@]} == 0 )) && (( ! need_socket )); then
+  echo "${BOLD}Install scanners${RST}"
+  local all=(osv-scanner gitleaks trufflehog semgrep checkov socket) missing=() t
+  for t in "${all[@]}"; do have "$t" || missing+=("$t"); done
+  if (( ${#missing[@]} == 0 )); then
     echo "${GRN}All scanners already installed.${RST}"; return 0
   fi
 
-  if (( ${#pkgs[@]} )); then
+  local chosen=()
+  if (( yes )); then
+    chosen=("${missing[@]}")
+  else
+    local i
+    echo "Missing:"
+    for i in "${!missing[@]}"; do printf '  %s%d%s) %s\n' "$GRN" "$((i + 1))" "$RST" "${missing[$i]}"; done
+    printf 'Install which? [a]ll, numbers (e.g. 1 3), or Enter to cancel: '
+    local ans; read -r ans
+    case "$ans" in
+      a|A|all) chosen=("${missing[@]}") ;;
+      ""|n|N|no) echo "Cancelled."; return 0 ;;
+      *)
+        local tok
+        for tok in $ans; do
+          if [[ "$tok" =~ ^[0-9]+$ ]] && (( tok >= 1 && tok <= ${#missing[@]} )); then
+            chosen+=("${missing[$((tok - 1))]}")
+          else
+            echo "${YEL}ignoring '$tok'${RST}"
+          fi
+        done
+        ;;
+    esac
+  fi
+  (( ${#chosen[@]} )) || { echo "Nothing selected."; return 0; }
+
+  # Split selection into brew packages vs socket (npm).
+  local brew_pkgs=() do_socket=0
+  for t in "${chosen[@]}"; do
+    if [[ "$t" == socket ]]; then do_socket=1; else brew_pkgs+=("$t"); fi
+  done
+
+  if (( ${#brew_pkgs[@]} )); then
     if have brew; then
-      echo "+ brew install ${pkgs[*]}"
-      brew install "${pkgs[@]}"
+      echo "+ brew install ${brew_pkgs[*]}"
+      brew install "${brew_pkgs[@]}"
     else
-      echo "${YEL}Homebrew not found.${RST} Install it from https://brew.sh then re-run 'seckit install'."
-      echo "${DIM}(Windows: scoop install ${pkgs[*]/semgrep/}; pipx install semgrep checkov)${RST}"
+      echo "${YEL}Homebrew not found.${RST} Install it from https://brew.sh then re-run."
+      echo "${DIM}(Windows: scoop install ${brew_pkgs[*]/semgrep/}; pipx install checkov)${RST}"
     fi
   fi
-
-  if (( need_socket )); then
+  if (( do_socket )); then
     if have npm; then
       echo "+ npm i -g @socketsecurity/cli"
       npm i -g @socketsecurity/cli
     else
-      echo "${DIM}socket (optional) needs npm: install Node.js, then 'npm i -g @socketsecurity/cli'.${RST}"
+      echo "${DIM}socket needs npm: install Node.js, then 'npm i -g @socketsecurity/cli'.${RST}"
     fi
   fi
 
@@ -189,30 +220,46 @@ cmd_menu() {
     echo "  ${GRN}4${RST}) harden      ${DIM}add AI-agent guardrails to a repo${RST}"
     echo "  ${GRN}5${RST}) reminders   ${DIM}show every security reminder${RST}"
     echo "  ${GRN}q${RST}) quit"
-    printf 'Select: '
+    printf 'Select (q to quit): '
     read -r choice || break
     echo
     case "$choice" in
       1|doctor)     cmd_doctor ;;
       2|install)    cmd_install ;;
       3|scan)
-        printf 'Directory to scan [~/Git]: '; read -r dir
+        printf 'Directory to scan [~/Git] (b=back): '; read -r dir
+        if [[ "$dir" == b || "$dir" == back ]]; then echo; continue; fi
         dir="${dir:-$HOME/Git}"; dir="${dir/#\~/$HOME}"
-        printf 'Also run Socket (malicious-package check)? [y/N]: '; read -r sk
-        if [[ "$sk" == [yY]* ]]; then
-          bash "$HERE/scan_repos.sh" "$dir" --socket
-        else
-          bash "$HERE/scan_repos.sh" "$dir"
-        fi
+        local scanners=(osv gitleaks trufflehog semgrep checkov socket) si pick only=""
+        echo "Scanners:"
+        for si in "${!scanners[@]}"; do printf '  %s%d%s) %s\n' "$GRN" "$((si + 1))" "$RST" "${scanners[$si]}"; done
+        printf 'Run which? [a]ll (no socket), numbers (e.g. 1 2 3), or Enter for all: '
+        read -r pick
+        case "$pick" in
+          ""|a|A|all) bash "$HERE/scan_repos.sh" "$dir" ;;
+          *)
+            local tok
+            for tok in $pick; do
+              if [[ "$tok" =~ ^[1-6]$ ]]; then only="${only:+$only,}${scanners[$((tok - 1))]}"; fi
+            done
+            if [[ -n "$only" ]]; then bash "$HERE/scan_repos.sh" "$dir" --only="$only"
+            else echo "Nothing selected."; fi
+            ;;
+        esac
         ;;
-      4|harden)  cmd_harden ;;
+      4|harden)     cmd_harden ;;
       5|reminders)  cmd_reminders ;;
       q|Q|quit|exit) break ;;
-      "")           ;;
-      *)            echo "Unknown choice: $choice" ;;
+      "")           continue ;;
+      *)            echo "Unknown choice: $choice"; continue ;;
     esac
     echo
+    printf "${DIM}Enter to return to the menu, q to quit:${RST} "
+    read -r back || break
+    [[ "$back" == q || "$back" == quit ]] && break
+    echo
   done
+  echo "Bye - stay safe."
 }
 
 # ---------- Harden: drop AI-agent guardrails into a repo --------------------
@@ -237,16 +284,25 @@ _h_block() {  # append SecKit block to dest if marker not already present
   echo "  ${GRN}block ->${RST} ${dest#$root/}"
 }
 
+# Confirm before writing (skipped with --yes, or when non-interactive).
+_h_confirm() {
+  (( yes )) && return 0
+  [[ -t 0 && -t 1 ]] || return 0
+  local ok; printf 'Proceed? [y/N]: '; read -r ok
+  [[ "$ok" == [yY]* ]]
+}
+
 # Guardrails target Claude Code and GitHub Copilot only (for now).
 cmd_harden() {
-  local target="" force=0 scope="" a
+  local target="" force=0 scope="" yes=0 a
   for a in "$@"; do
     case "$a" in
-      --force)  force=1 ;;
-      --global) scope="global" ;;
-      --repo)   scope="repo" ;;
-      --*)      echo "Unknown harden flag: $a" >&2; return 2 ;;
-      *)        target="$a"; scope="${scope:-repo}" ;;
+      --force)   force=1 ;;
+      --global)  scope="global" ;;
+      --repo)    scope="repo" ;;
+      --yes|-y)  yes=1 ;;
+      --*)       echo "Unknown harden flag: $a" >&2; return 2 ;;
+      *)         target="$a"; scope="${scope:-repo}" ;;
     esac
   done
   local TPL="$HERE/templates"
@@ -258,8 +314,13 @@ cmd_harden() {
       echo "${BOLD}Add AI-agent guardrails${RST} ${DIM}(Claude Code + GitHub Copilot)${RST}"
       echo "  ${GRN}r${RST}) repo    ${DIM}this repository only${RST}"
       echo "  ${GRN}g${RST}) global  ${DIM}the whole machine - every repo${RST}"
-      printf 'Scope [r/g]: '; read -r ans
-      case "$ans" in g|G|global) scope="global" ;; *) scope="repo" ;; esac
+      echo "  ${GRN}b${RST}) back    ${DIM}cancel${RST}"
+      printf 'Scope [r/g/b]: '; read -r ans
+      case "$ans" in
+        g|G|global) scope="global" ;;
+        b|B|back)   echo "Cancelled."; return 0 ;;
+        *)          scope="repo" ;;
+      esac
       echo
     else
       scope="repo"
@@ -269,6 +330,12 @@ cmd_harden() {
   if [[ "$scope" == "global" ]]; then
     local root="$HOME"
     echo "${BOLD}Harden (global)${RST} - applies to every repo on this machine"
+    echo "Will add/update:"
+    echo "  ~/.config/git/ignore     ${DIM}secret-ignore patterns${RST}"
+    echo "  git core.excludesfile    ${DIM}point at it (only if unset)${RST}"
+    echo "  ~/.claude/settings.json  ${DIM}Claude deny rules (.seckit.json if it exists)${RST}"
+    _h_confirm || { echo "Cancelled."; return 0; }
+    echo
     # Both Claude Code and Copilot's index honour .gitignore -> a global ignore covers both.
     local gi="$HOME/.config/git/ignore"
     _h_block "$gi" "$TPL/secret-ignore.txt"
@@ -303,6 +370,15 @@ cmd_harden() {
   [[ -d "$target" ]] || { echo "Not a directory: $target" >&2; return 2; }
   local root; root="$(cd "$target" && pwd)"
   echo "${BOLD}Harden${RST} ${root} ${DIM}(Claude + Copilot)${RST}"
+  echo "Will add ${DIM}(existing files skipped; --force to overwrite)${RST}:"
+  echo "  .gitignore                              ${DIM}secret block${RST}"
+  echo "  .claude/settings.json                   ${DIM}Claude deny rules${RST}"
+  echo "  CLAUDE.md                               ${DIM}agent instructions${RST}"
+  echo "  .github/copilot-instructions.md         ${DIM}agent instructions${RST}"
+  echo "  .github/copilot-content-exclusion.yml   ${DIM}paste into GitHub${RST}"
+  echo "  .pre-commit-config.yaml, .gitleaks.toml ${DIM}gitleaks gate${RST}"
+  _h_confirm || { echo "Cancelled."; return 0; }
+  echo
 
   # .gitignore secret block - the backbone both Claude Code and Copilot honour.
   _h_block "$root/.gitignore" "$TPL/secret-ignore.txt"
@@ -346,7 +422,7 @@ fi
 case "$cmd" in
   menu)             cmd_menu ;;
   doctor|check)     cmd_doctor ;;
-  install|setup)    cmd_install ;;
+  install|setup)    cmd_install "$@" ;;
   scan)             exec bash "$HERE/scan_repos.sh" "$@" ;;
   harden|guard|init) cmd_harden "$@" ;;
   reminders|tips)   cmd_reminders ;;

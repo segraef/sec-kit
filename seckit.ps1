@@ -93,23 +93,52 @@ function Show-Status {
 function Invoke-Startup { Show-Status }
 
 # Install the scanners via the platform package manager (scoop / pipx / npm).
+# Asks which of the missing ones to install. Pass -All to skip the prompt.
 function Invoke-Install {
-  Write-Host 'Installing scanners' -ForegroundColor White
-  $scoop = @()
-  foreach ($t in 'osv-scanner', 'gitleaks', 'trufflehog') { if (-not (Have $t)) { $scoop += $t } }
-  if ($scoop.Count) {
-    if (Have scoop) { Write-Host "+ scoop install $($scoop -join ' ')"; scoop install @scoop }
-    else { Write-Host 'scoop not found - install it from https://scoop.sh, then re-run seckit install.' -ForegroundColor Yellow }
+  param([switch]$All)
+  Write-Host 'Install scanners' -ForegroundColor White
+  $tools = 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov', 'socket'
+  $missing = @($tools | Where-Object { -not (Have $_) })
+  if (-not $missing) { Write-Host 'All scanners already installed.' -ForegroundColor Green; return }
+
+  $chosen = @()
+  if ($All) {
+    $chosen = $missing
   }
-  if (-not (Have checkov)) {
-    if (Have pipx) { Write-Host '+ pipx install checkov'; pipx install checkov }
-    elseif (Have pip) { Write-Host '+ pip install checkov'; pip install checkov }
-    else { Write-Host 'checkov needs Python (pipx or pip).' -ForegroundColor Yellow }
+  else {
+    Write-Host 'Missing:'
+    for ($i = 0; $i -lt $missing.Count; $i++) { Write-Host ("  {0}) {1}" -f ($i + 1), $missing[$i]) -ForegroundColor Green }
+    $ans = Read-Host 'Install which? [a]ll, numbers (e.g. 1 3), or Enter to cancel'
+    if ($ans -match '^(a|all)$') { $chosen = $missing }
+    elseif (-not $ans -or $ans -match '^(n|no)$') { Write-Host 'Cancelled.'; return }
+    else {
+      foreach ($tok in ($ans -split '\s+')) {
+        if ($tok -match '^\d+$' -and [int]$tok -ge 1 -and [int]$tok -le $missing.Count) { $chosen += $missing[[int]$tok - 1] }
+        elseif ($tok) { Write-Host "ignoring '$tok'" -ForegroundColor Yellow }
+      }
+    }
   }
-  if (-not (Have semgrep)) { Write-Host 'semgrep: native Windows is unsupported - use WSL or Docker.' -ForegroundColor DarkGray }
-  if (-not (Have socket)) {
-    if (Have npm) { Write-Host '+ npm i -g @socketsecurity/cli'; npm i -g @socketsecurity/cli }
-    else { Write-Host 'socket (optional) needs npm.' -ForegroundColor DarkGray }
+  if (-not $chosen) { Write-Host 'Nothing selected.'; return }
+
+  $scoopPkgs = @()
+  foreach ($t in $chosen) {
+    switch ($t) {
+      'checkov' {
+        if (Have pipx) { Write-Host '+ pipx install checkov'; pipx install checkov }
+        elseif (Have pip) { Write-Host '+ pip install checkov'; pip install checkov }
+        else { Write-Host 'checkov needs Python (pipx or pip).' -ForegroundColor Yellow }
+      }
+      'semgrep' { Write-Host 'semgrep: native Windows is unsupported - use WSL or Docker.' -ForegroundColor DarkGray }
+      'socket' {
+        if (Have npm) { Write-Host '+ npm i -g @socketsecurity/cli'; npm i -g @socketsecurity/cli }
+        else { Write-Host 'socket (optional) needs npm.' -ForegroundColor DarkGray }
+      }
+      default { $scoopPkgs += $t }
+    }
+  }
+  if ($scoopPkgs.Count) {
+    if (Have scoop) { Write-Host "+ scoop install $($scoopPkgs -join ' ')"; scoop install @scoopPkgs }
+    else { Write-Host 'scoop not found - install it from https://scoop.sh, then re-run.' -ForegroundColor Yellow }
   }
   Write-Host ''; Invoke-Doctor
 }
@@ -140,15 +169,17 @@ function Invoke-Menu {
     Write-Host '  3) scan        sweep repos for trouble'
     Write-Host '  4) reminders   show every security reminder'
     Write-Host '  q) quit'
-    $choice = Read-Host 'Select'
+    $choice = Read-Host 'Select (q to quit)'
     Write-Host ''
     switch ($choice) {
       { $_ -in '1', 'doctor' } { Invoke-Doctor }
       { $_ -in '2', 'install' } { Invoke-Install }
       { $_ -in '3', 'scan' } {
-        $dir = Read-Host 'Directory to scan [~/Git]'
-        if (-not $dir) { $dir = Join-Path $HOME 'Git' }
-        & (Join-Path $Here 'scan_repos.ps1') $dir
+        $dir = Read-Host 'Directory to scan [~/Git] (b=back)'
+        if ($dir -notin 'b', 'back') {
+          if (-not $dir) { $dir = Join-Path $HOME 'Git' }
+          & (Join-Path $Here 'scan_repos.ps1') $dir
+        }
       }
       { $_ -in '4', 'reminders' } { Invoke-Reminders }
       { $_ -in 'q', 'Q', 'quit', 'exit' } { return }

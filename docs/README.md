@@ -6,7 +6,8 @@ and PowerShell (`seckit.ps1`) are equivalent; `harden` is Bash-only for now.
 
 ## Install
 
-The script installs the scanners for you:
+The script installs the scanners for you. It lists the missing ones and asks
+which to install (or pass `--all` / `-y` to take them all):
 
 ```bash
 bash seckit.sh install        # macOS / Linux: Homebrew + npm
@@ -32,8 +33,9 @@ ln -s "$PWD/seckit.sh" /usr/local/bin/seckit
 > `seckit install` uses Homebrew on macOS/Linux and scoop/pipx on Windows.
 > `semgrep` has no native Windows build - use WSL or Docker there.
 
-Run with no arguments on a terminal to open the interactive menu. In a pipe or
-CI (no TTY) the no-arg form prints help, so it never hangs.
+Run with no arguments on a terminal to open the interactive menu; inside it, `b`
+backs out of a submenu and `q` quits. In a pipe or CI (no TTY) the no-arg form
+prints help, so it never hangs.
 
 ## Tools
 
@@ -52,26 +54,38 @@ shows what is present and how to install the rest.
 ## Scan
 
 ```bash
-seckit scan ~/Git           # scan every repo under ~/Git
-seckit scan ~/Git --socket  # also run Socket (needs `socket login`)
+seckit scan ~/Git                       # all installed scanners (except socket)
+seckit scan ~/Git --socket              # also run Socket (needs `socket login`)
+seckit scan ~/Git --only=gitleaks,osv   # just these scanners
+seckit scan ~/Git --skip=semgrep        # all except semgrep (the slow one)
 ```
 
+Scanner names: `osv`, `gitleaks`, `trufflehog`, `semgrep`, `checkov`, `socket`.
+In the interactive menu, the scan submenu lists the scanners and lets you pick
+which to run.
+
 A "repo" is any folder containing `.git` or `package.json`; `node_modules` is
-skipped. Exits non-zero if any repo has findings, so it works in CI. `semgrep`
-uses `--config auto` (no source upload); `checkov` runs offline. Socket is
-opt-in because it uploads each repo's manifest to socket.dev.
+skipped. It runs per repo, so a big sweep multiplies - `semgrep` is the
+bottleneck (it fetches rules and does full SAST), so `--skip=semgrep` (or
+`--only=...`) keeps a quick pre-flight fast. Exits non-zero if any repo has
+findings, so it works in CI. `semgrep` uses `--config auto` (no source upload);
+`checkov` runs offline; `socket` is opt-in because it uploads each repo's
+manifest to socket.dev.
 
 ## Harden a repo against AI agents
 
 `seckit harden` stops **Claude Code and GitHub Copilot** pulling secrets into
 their context. It asks whether to apply guardrails at **repo** level or
-**global** level, and never clobbers existing files (`--force` to overwrite).
+**global** level, shows the list of files it will add, and asks you to confirm
+before writing. It never clobbers existing files (`--force` to overwrite,
+`--yes` to skip the confirm).
 
 ```bash
-seckit harden            # ask scope, then harden
+seckit harden            # ask scope, preview, confirm, then harden
 seckit harden ~/Git/foo  # repo scope, a specific repo
 seckit harden --repo     # repo scope, current dir
 seckit harden --global   # whole machine
+seckit harden --yes      # skip the confirm prompt
 ```
 
 Repo level writes a `.gitignore` secret block, `.claude/settings.json` deny
