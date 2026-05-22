@@ -1,0 +1,22 @@
+# Security reminders shown by `seckit startup` / `seckit menu` / `seckit reminders`.
+# One reminder per line, format:   reminder text => how to tackle it
+# The part after " => " is actionable: a seckit command where one helps,
+# otherwise the concrete manual step. Lines starting with # are ignored.
+
+Rotate secrets and API keys on a schedule, and revoke tokens you no longer use. => Rotate in the provider console, then run seckit scan to confirm nothing leaked.
+Keep secrets out of your AI agent's context (.env, keys, credentials). => Run seckit harden: it adds the .gitignore block, Claude deny rules and the Copilot exclusion.
+Never run `npm install` on an untrusted clone; install scripts run instantly. => Run seckit scan on it first, then install with npm ci --ignore-scripts.
+Use `npm ci` instead of `npm install` so the lockfile is law. => Run npm ci, and commit package-lock.json so the lockfile is the source of truth.
+Turn on hardware-key 2FA for GitHub, npm and your cloud console. => Enable 2FA with a hardware key in each provider's account security settings.
+Pin GitHub Actions to a commit SHA, not a tag. => Replace each action's @tag with the full commit SHA and add a minimal permissions: block.
+Let new dependency versions age a few days before adopting them. => Set Renovate minimumReleaseAge to 3-7 days; fast-track only security fixes.
+Review dependency-update diffs like real code; a version bump can carry a payload. => Run seckit scan to flag known-bad versions, and read the diff before you merge.
+Enable IDE Workspace Trust so opening an unknown folder cannot auto-run tasks. => Turn on Workspace Trust in your editor so unknown folders open in restricted mode.
+Scan a repo before you trust it, install it, or run it. => Run seckit scan <dir> (add --socket for malicious-package checks).
+Keep your AI agent in ask/confirm mode on unfamiliar repos; never bypass permissions. => Run seckit harden to install agent guardrails, and keep permission prompts on.
+Prefer scoped, short-lived tokens over long-lived broad ones. => Issue scoped, expiring tokens in the provider console; delete broad personal access tokens.
+Make sure your scanners are actually installed, or scans silently skip checks. => Run seckit doctor.
+Check a repo's dependencies for known vulnerabilities (CVEs) regularly. => Run seckit scan <dir>.
+Catch SQLi, XSS and CSRF in your own code, not just in dependencies. => Run seckit scan <dir>; semgrep flags vulnerable patterns in your source.
+Scan infrastructure-as-code (Bicep, Terraform, GitHub Actions) for misconfig. => Run seckit scan <dir>; checkov reads your IaC and CI config offline.
+New repo or fresh clone? Lay down agent guardrails before you start coding. => Run seckit harden.

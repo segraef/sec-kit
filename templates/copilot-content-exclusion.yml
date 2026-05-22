@@ -1,0 +1,23 @@
+# GitHub Copilot content exclusion (authoritative Copilot control).
+#
+# Copilot does not honour a committed ".copilotignore" file. Exclusions are set
+# on GitHub: Repo (or Org) > Settings > Copilot > Content exclusion, pasted as
+# YAML. This file is a ready-to-paste starting point. Requires Copilot
+# Business/Enterprise. (The .gitignore block SecKit writes already keeps these
+# files out of Copilot's index in most clients; this is the belt-and-braces.)
+"*":
+  - "**/.env"
+  - "**/.env.*"
+  - "**/*.pem"
+  - "**/*.key"
+  - "**/*.p12"
+  - "**/*.pfx"
+  - "**/id_rsa*"
+  - "**/id_ed25519*"
+  - "**/.npmrc"
+  - "**/.netrc"
+  - "**/.pgpass"
+  - "**/credentials*"
+  - "**/service-account*.json"
+  - "**/*.tfvars"
+  - "**/*.tfstate"

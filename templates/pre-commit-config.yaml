@@ -1,0 +1,13 @@
+# Local secret-scanning gate. Install once with:
+#   brew install gitleaks pre-commit && pre-commit install
+#
+# `gitleaks git --staged` scans only the staged diff, so commits stay fast.
+# It auto-detects .gitleaks.toml in the repo root.
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged secret scan)
+        entry: gitleaks git --pre-commit --redact --staged --verbose
+        language: system
+        pass_filenames: false
