@@ -6,18 +6,31 @@ and PowerShell (`seckit.ps1`) are equivalent; `harden` is Bash-only for now.
 
 ## Install
 
+The script installs the scanners for you:
+
+```bash
+bash seckit.sh install        # macOS / Linux: Homebrew + npm
+pwsh ./seckit.ps1 install     # Windows: scoop + pipx + npm
+```
+
+Or install them by hand:
+
 ```bash
 brew install osv-scanner gitleaks trufflehog semgrep checkov   # macOS / Linux
-# Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install semgrep checkov
+# Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install checkov
 npm i -g @socketsecurity/cli                                    # only for socket
 ```
 
-Run it directly with `bash seckit.sh <command>`, or put it on your PATH:
+Run with `bash seckit.sh <command>` (or `pwsh ./seckit.ps1 <command>`), or put it
+on your PATH:
 
 ```bash
 chmod +x seckit.sh banner.sh scan_repos.sh
 ln -s "$PWD/seckit.sh" /usr/local/bin/seckit
 ```
+
+> `seckit install` uses Homebrew on macOS/Linux and scoop/pipx on Windows.
+> `semgrep` has no native Windows build - use WSL or Docker there.
 
 Run with no arguments on a terminal to open the interactive menu. In a pipe or
 CI (no TTY) the no-arg form prints help, so it never hangs.

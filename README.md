@@ -10,11 +10,25 @@
 
 ## Quick start
 
+Clone, then run it - `seckit install` sets up the scanners for you.
+
+**macOS / Linux**
+
 ```bash
-brew install osv-scanner gitleaks trufflehog semgrep checkov
-ln -s "$PWD/seckit.sh" /usr/local/bin/seckit   # optional: short command
-seckit                                          # interactive menu
+git clone https://github.com/segraef/sec-kit.git && cd sec-kit
+bash seckit.sh install   # installs scanners via Homebrew + npm
+bash seckit.sh           # interactive menu
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+git clone https://github.com/segraef/sec-kit.git; cd sec-kit
+pwsh ./seckit.ps1 install   # installs scanners via scoop + pipx + npm
+pwsh ./seckit.ps1           # interactive menu
+```
+
+Optional: `ln -s "$PWD/seckit.sh" /usr/local/bin/seckit` so you can just type `seckit`.
 
 ## Commands
 

@@ -3,6 +3,7 @@
 # seckit - a small, portable security kit you carry between machines.
 #
 #   seckit             open the interactive menu (banner + status + picker)
+#   seckit install     install any missing scanners (brew + npm)
 #   seckit doctor      check that the scanners and their prerequisites are installed
 #   seckit scan [DIR]  sweep repos for vulnerable deps, malicious packages, secrets
 #   seckit harden [DIR] drop AI-agent guardrails into a repo (--global for machine-wide)
@@ -74,9 +75,45 @@ cmd_doctor() {
   if (( missing == 0 )); then
     echo "${GRN}All tools present.${RST}"
   else
-    echo "${YEL}${missing} tool(s) missing. Install the ones above to enable every scanner.${RST}"
+    echo "${YEL}${missing} tool(s) missing.${RST} Run ${BOLD}seckit install${RST} to set them up."
   fi
   return $missing
+}
+
+# Install the scanners via the platform package manager (brew + npm).
+cmd_install() {
+  echo "${BOLD}Installing scanners${RST}"
+  local pkgs=() t
+  for t in osv-scanner gitleaks trufflehog semgrep checkov; do
+    have "$t" || pkgs+=("$t")
+  done
+  local need_socket=0; have socket || need_socket=1
+
+  if (( ${#pkgs[@]} == 0 )) && (( ! need_socket )); then
+    echo "${GRN}All scanners already installed.${RST}"; return 0
+  fi
+
+  if (( ${#pkgs[@]} )); then
+    if have brew; then
+      echo "+ brew install ${pkgs[*]}"
+      brew install "${pkgs[@]}"
+    else
+      echo "${YEL}Homebrew not found.${RST} Install it from https://brew.sh then re-run 'seckit install'."
+      echo "${DIM}(Windows: scoop install ${pkgs[*]/semgrep/}; pipx install semgrep checkov)${RST}"
+    fi
+  fi
+
+  if (( need_socket )); then
+    if have npm; then
+      echo "+ npm i -g @socketsecurity/cli"
+      npm i -g @socketsecurity/cli
+    else
+      echo "${DIM}socket (optional) needs npm: install Node.js, then 'npm i -g @socketsecurity/cli'.${RST}"
+    fi
+  fi
+
+  echo
+  cmd_doctor || true
 }
 
 cmd_reminders() {
@@ -136,7 +173,7 @@ print_status() {
   fi
 }
 
-cmd_help() { sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+cmd_help() { sed -n '3,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # Interactive menu: shown when seckit is run with no arguments on a terminal.
 cmd_menu() {
@@ -147,16 +184,18 @@ cmd_menu() {
   while true; do
     echo "${BOLD}SecKit${RST} - choose an action"
     echo "  ${GRN}1${RST}) doctor      ${DIM}check your tools are installed${RST}"
-    echo "  ${GRN}2${RST}) scan        ${DIM}sweep repos for vulns, malware, secrets${RST}"
-    echo "  ${GRN}3${RST}) harden      ${DIM}add AI-agent guardrails to a repo${RST}"
-    echo "  ${GRN}4${RST}) reminders   ${DIM}show every security reminder${RST}"
+    echo "  ${GRN}2${RST}) install     ${DIM}install any missing scanners${RST}"
+    echo "  ${GRN}3${RST}) scan        ${DIM}sweep repos for vulns, malware, secrets${RST}"
+    echo "  ${GRN}4${RST}) harden      ${DIM}add AI-agent guardrails to a repo${RST}"
+    echo "  ${GRN}5${RST}) reminders   ${DIM}show every security reminder${RST}"
     echo "  ${GRN}q${RST}) quit"
     printf 'Select: '
     read -r choice || break
     echo
     case "$choice" in
       1|doctor)     cmd_doctor ;;
-      2|scan)
+      2|install)    cmd_install ;;
+      3|scan)
         printf 'Directory to scan [~/Git]: '; read -r dir
         dir="${dir:-$HOME/Git}"; dir="${dir/#\~/$HOME}"
         printf 'Also run Socket (malicious-package check)? [y/N]: '; read -r sk
@@ -166,8 +205,8 @@ cmd_menu() {
           bash "$HERE/scan_repos.sh" "$dir"
         fi
         ;;
-      3|harden)  cmd_harden ;;
-      4|reminders)  cmd_reminders ;;
+      4|harden)  cmd_harden ;;
+      5|reminders)  cmd_reminders ;;
       q|Q|quit|exit) break ;;
       "")           ;;
       *)            echo "Unknown choice: $choice" ;;
@@ -307,6 +346,7 @@ fi
 case "$cmd" in
   menu)             cmd_menu ;;
   doctor|check)     cmd_doctor ;;
+  install|setup)    cmd_install ;;
   scan)             exec bash "$HERE/scan_repos.sh" "$@" ;;
   harden|guard|init) cmd_harden "$@" ;;
   reminders|tips)   cmd_reminders ;;
