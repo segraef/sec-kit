@@ -1,8 +1,9 @@
 # SecKit documentation
 
 Portable security pre-flight kit. One command checks your tools, scans repos,
-hardens against AI agents, and surfaces rotating reminders. Bash (`seckit.sh`)
-and PowerShell (`seckit.ps1`) are equivalent; `harden` is Bash-only for now.
+hardens against AI agents, audits remote repos, enforces missing settings, and
+surfaces rotating reminders. Bash (`seckit.sh`) and PowerShell (`seckit.ps1`)
+are equivalent.
 
 ## Install
 
@@ -17,8 +18,9 @@ pwsh ./seckit.ps1 install     # Windows: scoop + pipx + npm
 Or install them by hand:
 
 ```bash
-brew install osv-scanner gitleaks trufflehog semgrep checkov pre-commit   # macOS / Linux
-# Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install checkov pre-commit
+brew install jq yq gh azure-cli osv-scanner gitleaks trufflehog semgrep checkov pre-commit
+az extension add --name azure-devops --upgrade   # for ADO audit / enforce
+# Windows: scoop install jq yq gh azure-cli osv-scanner gitleaks trufflehog ; pipx install checkov pre-commit
 npm i -g @socketsecurity/cli                                    # only for socket
 ```
 
@@ -44,6 +46,10 @@ shows what is present and how to install the rest.
 
 | Tool | Catches | Needs |
 |---|---|---|
+| `jq` | JSON shaping for `mcp`, `audit`, `enforce` | - |
+| `yq` | YAML parsing for `mcp` and policy files | - |
+| `gh` | GitHub posture `audit` + `enforce` | `gh auth login` |
+| `az` + `azure-devops` extension | Azure DevOps `audit` + `enforce` | `AZURE_DEVOPS_EXT_PAT` |
 | `osv-scanner` | dependencies with known vulnerabilities (CVEs) | - |
 | `gitleaks` | secrets in git history | - |
 | `trufflehog` | secrets in working files | - |
@@ -100,6 +106,100 @@ Global level writes `~/.config/git/ignore`, sets `git config --global
 core.excludesfile` (only if unset), and adds Claude deny rules to
 `~/.claude/settings.json` (or `~/.claude/settings.seckit.json` to merge).
 
+## Audit a remote repo or org
+
+`seckit audit` is the read-only posture check. It calls `gh` for GitHub and `az
+repos` for Azure DevOps, compares the live state to the policy files in
+[`../templates/policy-github.yml`](../templates/policy-github.yml) and
+[`../templates/policy-ado.yml`](../templates/policy-ado.yml), and writes a
+markdown report under `~/.seckit/reports/audit-<timestamp>.md`. Nothing is
+written to the remote.
+
+```bash
+seckit audit github segraef                    # org-level
+seckit audit github segraef/sec-kit            # repo-level
+seckit audit ado contoso/Platform              # ADO project
+seckit audit ado contoso/Platform/web-api      # ADO repo
+```
+
+The report has the same shape as `seckit scan`: a summary line, a table of
+findings tagged `required` or `recommended`, and an "AI agent prompt" section
+that pastes straight into Claude or Copilot for a remediation plan. Exit code
+is non-zero when any `required` setting fails. Safe to run in customer
+environments because every call is a `GET`.
+
+## Enforce missing settings
+
+`seckit enforce` writes the settings flagged by `audit`. It is dry-run by
+default and prints every command it would run; pass `--apply` (Bash) or
+`-Apply` (PowerShell) to actually write. It enables branch protection on the
+default branch, turns on vulnerability alerts + secret scanning + push
+protection + private vulnerability reporting, clamps workflow permissions to
+read-only with no PR approval, and drops any missing `SECURITY.md`,
+`CODEOWNERS`, dependabot, CodeQL or PR template files into the cwd.
+
+```bash
+seckit enforce github segraef/sec-kit             # dry-run
+seckit enforce github segraef/sec-kit --apply     # write
+seckit enforce ado contoso/Platform/web-api       # dry-run ADO
+```
+
+Use it as a follow-up to `audit`: review the report, then run `enforce` against
+the same target to close the gaps.
+
+## SecKit as an AI-assistant agent
+
+`seckit agent install` writes the SecKit prompt as a Claude subagent, GitHub
+Copilot chat mode, Cursor rule or `AGENTS.md` section, so any AI assistant can
+run the same playbook without the shell scripts installed. The canonical body
+lives in
+[`../templates/seckit-agent.md`](../templates/seckit-agent.md); the per-target
+frontmatter wrappers live in
+[`../templates/agents/`](../templates/agents/).
+
+```bash
+seckit agent show                       # print the canonical prompt
+seckit agent install                    # auto-detect targets in cwd
+seckit agent install --target claude    # write only one target
+seckit agent install --target all       # write claude, copilot, cursor, agents-md
+```
+
+Targets:
+
+- `claude` writes `.claude/agents/seckit.md` (subagent).
+- `copilot` writes `.github/chatmodes/seckit.chatmode.md`.
+- `cursor` writes `.cursor/rules/seckit.mdc`.
+- `agents-md` writes or appends `AGENTS.md`.
+
+The agent prompt is portable: it lists the same six steps `seckit scan` runs,
+references the same secret patterns, and emits the same report shape, so a
+Claude session in a sandbox produces output a SecKit-trained eye recognises.
+
+## MCP servers (security and enterprise packs)
+
+`seckit mcp` manages MCP (Model Context Protocol) servers from the registry in
+[`../templates/mcp/registry.yml`](../templates/mcp/registry.yml). It writes a
+client config under `.mcp.json` (Claude), `.vscode/mcp.json` (Copilot) or
+`~/.cursor/mcp.json` (Cursor), merging into any existing file. Two packs ship:
+
+- **security**: Semgrep, Snyk, OSV, Trivy, OpenSSF Scorecard. Use these to
+  give an assistant first-class access to your vulnerability tooling.
+- **enterprise**: GitHub, Azure DevOps, Atlassian (Jira + Confluence),
+  Microsoft Learn, Terraform registry, Microsoft Foundry. Use these for daily
+  enterprise work.
+
+```bash
+seckit mcp list                                       # everything, grouped by pack
+seckit mcp install --pack security --client claude    # 5 security servers
+seckit mcp install github --client copilot            # one server, one client
+seckit mcp install --pack enterprise --client all     # everything in every client
+seckit mcp doctor                                     # which clients + env vars are present
+```
+
+Servers that need a token are listed with their required environment
+variables. `seckit mcp doctor` shows which are set so you can fix them before
+the assistant starts. Restart the client after writing the config.
+
 ## Startup greeting
 
 Add one line to your shell rc for a banner, a rotating reminder, and scanner
@@ -128,9 +228,18 @@ your own by appending a line.
 |---|---|
 | `seckit.sh` / `seckit.ps1` | the dispatcher |
 | `scan_repos.sh` / `scan_repos.ps1` | the repo scanner |
+| `mcp.sh` / `mcp.ps1` | the MCP server manager |
+| `audit.sh` / `audit.ps1` | the read-only GitHub / ADO posture audit |
+| `enforce.sh` / `enforce.ps1` | writes the settings flagged by `audit` |
 | `banner.sh` | the animated startup banner |
 | `reminders.txt` | the reminders |
 | `templates/` | files `seckit harden` drops into a repo |
+| `templates/seckit-agent.md` | canonical AI-agent prompt |
+| `templates/agents/` | per-target frontmatter wrappers for `agent install` |
+| `templates/mcp/registry.yml` | MCP server catalog (security + enterprise) |
+| `templates/policy-github.yml` | GitHub posture policy used by `audit` and `enforce` |
+| `templates/policy-ado.yml` | Azure DevOps posture policy used by `audit` and `enforce` |
+| `templates/repo/` | repo posture files dropped by `harden` and `enforce` |
 
 The banner is single-byte ASCII rendered as solid blocks, so it works on stock
 macOS `bash` 3.2. Edit the art and `TAGLINE` at the top of `banner.sh`.

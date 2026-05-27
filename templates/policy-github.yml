@@ -1,0 +1,61 @@
+# SecKit GitHub policy
+#
+# Used by `seckit audit github <org/repo>` (read-only check) and by
+# `seckit enforce github <org/repo>` (write the missing settings, with
+# --apply). Each setting has a severity: required, recommended, info.
+# Exit codes from `audit` reflect only `required` violations.
+
+repo:
+
+  branch_protection:
+    default_branch:
+      required_pull_request_reviews:
+        required_approving_review_count: { value: 2, severity: required }
+        dismiss_stale_reviews:            { value: true, severity: required }
+        require_code_owner_reviews:       { value: true, severity: required }
+        require_last_push_approval:       { value: true, severity: recommended }
+      required_status_checks:
+        strict:                           { value: true, severity: required }
+        contexts:                         { value: [ci], severity: recommended }
+      required_conversation_resolution:   { value: true, severity: required }
+      required_signatures:                { value: true, severity: recommended }
+      required_linear_history:            { value: true, severity: recommended }
+      allow_force_pushes:                 { value: false, severity: required }
+      allow_deletions:                    { value: false, severity: required }
+      block_creations:                    { value: true, severity: recommended }
+      enforce_admins:                     { value: true, severity: required }
+
+  security:
+    vulnerability_alerts:                 { value: true, severity: required }
+    automated_security_fixes:             { value: true, severity: required }
+    secret_scanning:                      { value: enabled, severity: required }
+    secret_scanning_push_protection:      { value: enabled, severity: required }
+    code_scanning_default_setup:          { value: enabled, severity: required }
+    private_vulnerability_reporting:      { value: true, severity: recommended }
+    dependabot_security_updates:          { value: true, severity: required }
+    dependabot_version_updates:           { value: true, severity: recommended }
+
+  workflow:
+    default_workflow_permissions:         { value: read, severity: required }
+    can_approve_pull_request_reviews:     { value: false, severity: required }
+    fork_pr_workflows_require_approval:   { value: true, severity: required }
+    allowed_actions:                      { value: selected, severity: recommended }
+
+  files:
+    SECURITY.md:                          { value: present, severity: required }
+    CODEOWNERS:                           { value: present, severity: required }
+    .github/pull_request_template.md:     { value: present, severity: recommended }
+    .github/dependabot.yml:               { value: present, severity: required }
+    .github/workflows/codeql.yml:         { value: present, severity: recommended }
+
+org:
+  members:
+    two_factor_requirement_enabled:       { value: true, severity: required }
+    members_can_create_public_repos:      { value: false, severity: recommended }
+    default_repository_permission:        { value: read, severity: required }
+  security:
+    advanced_security_enabled_for_new:    { value: true, severity: recommended }
+    secret_scanning_enabled_for_new:      { value: true, severity: required }
+    secret_scanning_push_protection_for_new: { value: true, severity: required }
+  audit:
+    audit_log_streaming:                  { value: enabled, severity: recommended }

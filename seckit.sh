@@ -2,14 +2,18 @@
 #
 # seckit - a small, portable security kit you carry between machines.
 #
-#   seckit             open the interactive menu (banner + status + picker)
-#   seckit install     install any missing scanners (brew + npm)
-#   seckit doctor      check that the scanners and their prerequisites are installed
-#   seckit scan [DIR]  sweep repos for vulnerable deps, malicious packages, secrets
-#   seckit harden [DIR] drop AI-agent guardrails into a repo (--global for machine-wide)
-#   seckit reminders   print all security reminders
-#   seckit startup     animated banner + one daily reminder + scanner health
-#   seckit help        this help
+#   seckit              open the interactive menu (banner + status + picker)
+#   seckit install      install any missing scanners + clients (brew/npm/pipx)
+#   seckit doctor       check that scanners + clients are installed
+#   seckit scan [DIR]   sweep local repos for vulns, malicious packages, secrets
+#   seckit harden [DIR] drop AI-agent guardrails + PR/CODEOWNERS into a repo
+#   seckit agent <sub>  install the SecKit agent prompt for Claude/Copilot/Cursor
+#   seckit mcp <sub>    list/install/check MCP servers (security + enterprise)
+#   seckit audit <p> <s>   read-only posture audit (github|ado) against a policy
+#   seckit enforce <p> <s> write the missing settings (dry-run by default)
+#   seckit reminders    print all security reminders
+#   seckit startup      animated banner + one rotating reminder + tool health
+#   seckit help         this help
 #
 # Run it before you start work in any repo. Reminders live in reminders.txt.
 #
@@ -51,6 +55,8 @@ TOOLS=(
   "git|core|brew install git"
   "node|core, needed by npm and socket|brew install node"
   "npm|core, needed by socket|ships with node"
+  "jq|core, JSON parsing for audit/enforce/mcp|brew install jq"
+  "yq|core, YAML parsing for mcp registry|brew install yq"
   "osv-scanner|scanner: vulnerable dependencies|brew install osv-scanner"
   "gitleaks|scanner: secrets in git history|brew install gitleaks"
   "trufflehog|scanner: secrets in files|brew install trufflehog"
@@ -58,6 +64,8 @@ TOOLS=(
   "checkov|scanner: IaC misconfig (Bicep, Terraform, Actions)|brew install checkov"
   "socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli"
   "pre-commit|gate: runs gitleaks before each commit|brew install pre-commit"
+  "gh|client: GitHub audit + enforce|brew install gh"
+  "az|client: Azure DevOps audit + enforce|brew install azure-cli"
 )
 
 cmd_doctor() {
@@ -87,8 +95,8 @@ cmd_install() {
   local yes=0 a
   for a in "$@"; do case "$a" in --all|-y|--yes) yes=1 ;; esac; done
 
-  echo "${BOLD}Install scanners${RST}"
-  local all=(osv-scanner gitleaks trufflehog semgrep checkov socket pre-commit) missing=() t
+  echo "${BOLD}Install scanners + clients${RST}"
+  local all=(jq yq osv-scanner gitleaks trufflehog semgrep checkov socket pre-commit gh az) missing=() t
   for t in "${all[@]}"; do have "$t" || missing+=("$t"); done
   if (( ${#missing[@]} == 0 )); then
     echo "${GRN}All scanners already installed.${RST}"; return 0
@@ -120,10 +128,14 @@ cmd_install() {
   fi
   (( ${#chosen[@]} )) || { echo "Nothing selected."; return 0; }
 
-  # Split selection into brew packages vs socket (npm).
-  local brew_pkgs=() do_socket=0
+  # Split selection into brew packages, brew casks (az), and npm (socket).
+  local brew_pkgs=() do_socket=0 do_az=0
   for t in "${chosen[@]}"; do
-    if [[ "$t" == socket ]]; then do_socket=1; else brew_pkgs+=("$t"); fi
+    case "$t" in
+      socket) do_socket=1 ;;
+      az)     do_az=1     ;;
+      *)      brew_pkgs+=("$t") ;;
+    esac
   done
 
   if (( ${#brew_pkgs[@]} )); then
@@ -133,6 +145,18 @@ cmd_install() {
     else
       echo "${YEL}Homebrew not found.${RST} Install it from https://brew.sh then re-run."
       echo "${DIM}(Windows: scoop install ${brew_pkgs[*]/semgrep/}; pipx install checkov)${RST}"
+    fi
+  fi
+  if (( do_az )); then
+    if have brew; then
+      echo "+ brew install azure-cli"
+      brew install azure-cli
+      if have az; then
+        echo "+ az extension add --name azure-devops --upgrade"
+        az extension add --name azure-devops --upgrade >/dev/null 2>&1 || true
+      fi
+    else
+      echo "${DIM}az needs Homebrew or download from https://aka.ms/azcli${RST}"
     fi
   fi
   if (( do_socket )); then
@@ -187,7 +211,7 @@ cmd_startup() {
 print_status() {
   load_reminders
   local n=0 ok=0 t
-  for t in osv-scanner gitleaks trufflehog semgrep checkov socket; do
+  for t in osv-scanner gitleaks trufflehog semgrep checkov socket gh az jq yq; do
     n=$((n + 1)); have "$t" && ok=$((ok + 1))
   done
   if (( ${#REMINDERS[@]} )); then
@@ -205,7 +229,7 @@ print_status() {
   fi
 }
 
-cmd_help() { sed -n '3,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+cmd_help() { sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # Interactive menu: shown when seckit is run with no arguments on a terminal.
 cmd_menu() {
@@ -216,10 +240,14 @@ cmd_menu() {
   while true; do
     echo "${BOLD}SecKit${RST} - choose an action"
     echo "  ${GRN}1${RST}) doctor      ${DIM}check your tools are installed${RST}"
-    echo "  ${GRN}2${RST}) install     ${DIM}install any missing scanners${RST}"
-    echo "  ${GRN}3${RST}) scan        ${DIM}sweep repos for vulns, malware, secrets${RST}"
-    echo "  ${GRN}4${RST}) harden      ${DIM}add AI-agent guardrails to a repo${RST}"
-    echo "  ${GRN}5${RST}) reminders   ${DIM}show every security reminder${RST}"
+    echo "  ${GRN}2${RST}) install     ${DIM}install any missing scanners + clients${RST}"
+    echo "  ${GRN}3${RST}) scan        ${DIM}sweep local repos for vulns, malware, secrets${RST}"
+    echo "  ${GRN}4${RST}) harden      ${DIM}AI guardrails + PR/CODEOWNERS + dependabot${RST}"
+    echo "  ${GRN}5${RST}) agent       ${DIM}install the SecKit agent for Claude/Copilot/Cursor${RST}"
+    echo "  ${GRN}6${RST}) mcp         ${DIM}install MCP servers (security + enterprise packs)${RST}"
+    echo "  ${GRN}7${RST}) audit       ${DIM}read-only posture audit (GitHub or ADO)${RST}"
+    echo "  ${GRN}8${RST}) enforce     ${DIM}write the missing settings (dry-run by default)${RST}"
+    echo "  ${GRN}9${RST}) reminders   ${DIM}show every security reminder${RST}"
     echo "  ${GRN}q${RST}) quit"
     printf 'Select (q to quit): '
     read -r choice || break
@@ -228,13 +256,13 @@ cmd_menu() {
       1|doctor)     cmd_doctor ;;
       2|install)    cmd_install ;;
       3|scan)
-        printf 'Directory to scan [~/Git] (b=back): '; read -r dir
+        printf 'Directory to scan [%s~/Git%s] (b to back): ' "$DIM" "$RST"; read -r dir
         if [[ "$dir" == b || "$dir" == back ]]; then echo; continue; fi
         dir="${dir:-$HOME/Git}"; dir="${dir/#\~/$HOME}"
         local scanners=(osv gitleaks trufflehog semgrep checkov socket) si pick only=""
-        echo "Scanners:"
+        echo "${BOLD}Pick scanners${RST}"
         for si in "${!scanners[@]}"; do printf '  %s%d%s) %s\n' "$GRN" "$((si + 1))" "$RST" "${scanners[$si]}"; done
-        printf 'Run which? [a]ll (no socket), numbers (e.g. 1 2 3), or Enter for all: '
+        printf 'Select [%sa%s for all (no socket), numbers, Enter = all]: ' "$GRN" "$RST"
         read -r pick
         case "$pick" in
           ""|a|A|all) bash "$HERE/scan_repos.sh" "$dir" ;;
@@ -249,7 +277,63 @@ cmd_menu() {
         esac
         ;;
       4|harden)     cmd_harden ;;
-      5|reminders)  cmd_reminders ;;
+      5|agent)      cmd_agent install ;;
+      6|mcp)
+        echo "${BOLD}MCP${RST} - pick an action"
+        echo "  ${GRN}1${RST}) list      ${DIM}show every server, grouped by pack${RST}"
+        echo "  ${GRN}2${RST}) install   ${DIM}wire a pack or one server into a client${RST}"
+        echo "  ${GRN}3${RST}) doctor    ${DIM}which clients + env vars are present${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r mc
+        case "$mc" in
+          1|l|list)    bash "$HERE/mcp.sh" list ;;
+          2|i|install)
+            printf 'Pack [%ssecurity%s|%senterprise%s] or server id: ' "$GRN" "$RST" "$GRN" "$RST"
+            read -r mp
+            [[ -z "$mp" ]] && { echo "Cancelled."; continue; }
+            if [[ "$mp" == security || "$mp" == enterprise ]]; then bash "$HERE/mcp.sh" install --pack "$mp"
+            else bash "$HERE/mcp.sh" install "$mp"; fi ;;
+          3|d|doctor)  bash "$HERE/mcp.sh" doctor ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
+        esac ;;
+      7|audit)
+        echo "${BOLD}Audit${RST} - pick a platform"
+        echo "  ${GRN}1${RST}) github    ${DIM}org or repo (needs gh)${RST}"
+        echo "  ${GRN}2${RST}) ado       ${DIM}project or repo (needs az + AZURE_DEVOPS_EXT_PAT)${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r ap
+        case "$ap" in
+          1|g|github)
+            printf 'Target [%sorg%s] or [%sorg/repo%s]: ' "$DIM" "$RST" "$DIM" "$RST"; read -r at
+            [[ -n "$at" ]] && bash "$HERE/audit.sh" github "$at" ;;
+          2|a|ado)
+            printf 'Target [%sorg/project%s] or [%sorg/project/repo%s]: ' "$DIM" "$RST" "$DIM" "$RST"; read -r at
+            [[ -n "$at" ]] && bash "$HERE/audit.sh" ado "$at" ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
+        esac ;;
+      8|enforce)
+        echo "${BOLD}Enforce${RST} - pick a platform"
+        echo "  ${GRN}1${RST}) github    ${DIM}write GitHub repo settings${RST}"
+        echo "  ${GRN}2${RST}) ado       ${DIM}write ADO repo branch policies${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r ep
+        case "$ep" in
+          1|g|github)
+            printf 'Target [%sorg/repo%s]: ' "$DIM" "$RST"; read -r et
+            printf 'Apply for real? [y/%sN%s]: ' "$BOLD" "$RST"; read -r ey
+            local apply=""; [[ "$ey" == [yY]* ]] && apply="--apply"
+            [[ -n "$et" ]] && bash "$HERE/enforce.sh" github "$et" $apply ;;
+          2|a|ado)
+            printf 'Target [%sorg/project/repo%s]: ' "$DIM" "$RST"; read -r et
+            printf 'Apply for real? [y/%sN%s]: ' "$BOLD" "$RST"; read -r ey
+            local apply=""; [[ "$ey" == [yY]* ]] && apply="--apply"
+            [[ -n "$et" ]] && bash "$HERE/enforce.sh" ado "$et" $apply ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
+        esac ;;
+      9|reminders)  cmd_reminders ;;
       q|Q|quit|exit) break ;;
       "")           continue ;;
       *)            echo "Unknown choice: $choice"; continue ;;
@@ -370,7 +454,7 @@ cmd_harden() {
   fi
   [[ -d "$target" ]] || { echo "Not a directory: $target" >&2; return 2; }
   local root; root="$(cd "$target" && pwd)"
-  echo "${BOLD}Harden${RST} ${root} ${DIM}(Claude + Copilot)${RST}"
+  echo "${BOLD}Harden${RST} ${root} ${DIM}(Claude + Copilot + repo files)${RST}"
   echo "Will add ${DIM}(existing files skipped; --force to overwrite)${RST}:"
   echo "  .gitignore                              ${DIM}secret block${RST}"
   echo "  .claude/settings.json                   ${DIM}Claude deny rules${RST}"
@@ -378,6 +462,11 @@ cmd_harden() {
   echo "  .github/copilot-instructions.md         ${DIM}agent instructions${RST}"
   echo "  .github/copilot-content-exclusion.yml   ${DIM}paste into GitHub${RST}"
   echo "  .pre-commit-config.yaml, .gitleaks.toml ${DIM}gitleaks gate${RST}"
+  echo "  SECURITY.md, CODEOWNERS                 ${DIM}repo hygiene${RST}"
+  echo "  .github/pull_request_template.md        ${DIM}PR checklist${RST}"
+  echo "  .github/dependabot.yml                  ${DIM}dependency updates${RST}"
+  echo "  .github/workflows/codeql.yml            ${DIM}code scanning${RST}"
+  echo "  .azuredevops/pull_request_template.md   ${DIM}ADO PR checklist${RST}"
   _h_confirm || { echo "Cancelled."; return 0; }
   echo
 
@@ -398,6 +487,13 @@ cmd_harden() {
   # gitleaks pre-commit gate (blocks any secret before it commits).
   _h_put "$root/.pre-commit-config.yaml" "$TPL/pre-commit-config.yaml"
   _h_put "$root/.gitleaks.toml"          "$TPL/gitleaks.toml"
+  # Repo hygiene + PR/CODEOWNERS + dependabot + codeql + ADO PR template.
+  _h_put "$root/SECURITY.md"                              "$TPL/repo/SECURITY.md"
+  _h_put "$root/CODEOWNERS"                               "$TPL/repo/CODEOWNERS"
+  _h_put "$root/.github/pull_request_template.md"         "$TPL/repo/pull_request_template.md"
+  _h_put "$root/.github/dependabot.yml"                   "$TPL/repo/dependabot.yml"
+  _h_put "$root/.github/workflows/codeql.yml"             "$TPL/repo/codeql.yml"
+  _h_put "$root/.azuredevops/pull_request_template.md"    "$TPL/repo/ado-pull-request-template.md"
 
   # Activate the hook so it actually runs on `git commit`. Dropping the
   # template is not enough - pre-commit needs to write .git/hooks/pre-commit.
@@ -430,6 +526,94 @@ cmd_harden() {
   echo ".github/copilot-content-exclusion.yml into GitHub > Settings > Copilot."
 }
 
+# ---------- Agent: install the SecKit agent prompt for AI assistants -------
+# Concatenates a small wrapper (frontmatter) with the canonical prompt body
+# from templates/seckit-agent.md, so every target uses the same source of
+# truth.
+cmd_agent() {
+  local TPL="$HERE/templates"
+  local CANON="$TPL/seckit-agent.md"
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    show|cat)
+      cat "$CANON"
+      return 0
+      ;;
+    install|add) ;;
+    ""|help|-h|--help)
+      cat <<USAGE
+seckit agent <sub>
+
+  show                          print the canonical agent prompt
+  install [--target X] [--force] install the agent files for an AI assistant
+
+Targets (default: auto-detect; 'all' writes every target):
+  claude       .claude/agents/seckit.md
+  copilot      .github/chatmodes/seckit.chatmode.md
+  cursor       .cursor/rules/seckit.mdc
+  agents-md    AGENTS.md  (vendor-neutral; appended if file exists)
+USAGE
+      return 0
+      ;;
+    *) echo "unknown agent sub-command: $sub" >&2; return 2 ;;
+  esac
+
+  # install path. Collect flags.
+  local force=0 targets=() a
+  for a in "$@"; do
+    case "$a" in
+      --force)    force=1 ;;
+      --target=*) targets+=("${a#*=}") ;;
+      --target)   shift; targets+=("${1:-}") ;;
+      --*)        echo "unknown agent flag: $a" >&2; return 2 ;;
+    esac
+  done
+
+  # Auto-detect targets when none specified.
+  if (( ${#targets[@]} == 0 )); then
+    [[ -d .claude ]] && targets+=(claude)
+    [[ -d .github ]] && targets+=(copilot)
+    [[ -d .cursor ]] && targets+=(cursor)
+    [[ -f AGENTS.md ]] && targets+=(agents-md)
+    (( ${#targets[@]} )) || targets=(claude agents-md)
+  fi
+  # Expand 'all'.
+  local expanded=() t
+  for t in "${targets[@]}"; do
+    if [[ "$t" == all ]]; then expanded+=(claude copilot cursor agents-md); else expanded+=("$t"); fi
+  done
+  targets=("${expanded[@]}")
+
+  local body
+  body="$(cat "$CANON")"
+  echo "${BOLD}Install SecKit agent${RST}  ${DIM}targets: ${targets[*]}${RST}"
+  for t in "${targets[@]}"; do
+    local wrapper dest
+    case "$t" in
+      claude)    wrapper="$TPL/agents/claude-subagent.md";  dest=".claude/agents/seckit.md" ;;
+      copilot)   wrapper="$TPL/agents/copilot-chatmode.md"; dest=".github/chatmodes/seckit.chatmode.md" ;;
+      cursor)    wrapper="$TPL/agents/cursor-rule.mdc";     dest=".cursor/rules/seckit.mdc" ;;
+      agents-md) wrapper="$TPL/agents/agents-md.md";        dest="AGENTS.md" ;;
+      *)         echo "  ${YEL}skip${RST} unknown target: $t"; continue ;;
+    esac
+    if [[ "$t" == agents-md && -f "$dest" ]]; then
+      if grep -q '# SecKit agent' "$dest" 2>/dev/null; then
+        echo "  ${DIM}ok (already has SecKit section): $dest${RST}"; continue
+      fi
+      printf '\n## SecKit security pre-flight\n\n%s\n' "$body" >> "$dest"
+      echo "  ${GRN}appended${RST} $dest"
+      continue
+    fi
+    if [[ -f "$dest" && "$force" != "1" ]]; then
+      echo "  ${DIM}skip (exists): $dest${RST}"; continue
+    fi
+    mkdir -p "$(dirname "$dest")"
+    { cat "$wrapper"; printf '\n'; printf '%s\n' "$body"; } > "$dest"
+    echo "  ${GRN}wrote${RST} $dest"
+  done
+  echo "${GRN}Done.${RST} Restart the AI assistant to pick up the new agent."
+}
+
 # ---------- Dispatch --------------------------------------------------------
 # No args on a terminal -> interactive menu; no args in a pipe/CI -> help.
 cmd="${1:-}"; shift 2>/dev/null || true
@@ -442,6 +626,10 @@ case "$cmd" in
   install|setup)    cmd_install "$@" ;;
   scan)             exec bash "$HERE/scan_repos.sh" "$@" ;;
   harden|guard|init) cmd_harden "$@" ;;
+  agent)            cmd_agent "$@" ;;
+  mcp)              exec bash "$HERE/mcp.sh" "$@" ;;
+  audit)            exec bash "$HERE/audit.sh" "$@" ;;
+  enforce)          exec bash "$HERE/enforce.sh" "$@" ;;
   reminders|tips)   cmd_reminders ;;
   startup|hello)    cmd_startup ;;
   help|-h|--help)   cmd_help ;;

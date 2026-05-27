@@ -18,9 +18,25 @@ bash seckit.sh              # macOS / Linux
 pwsh ./seckit.ps1           # Windows
 ```
 
-That opens a menu. Pick **2) install** the first time — SecKit installs the
+That opens a menu. Pick **2) install** the first time. SecKit installs the
 scanners for you. Then **3) scan** a folder, or **4) harden** a repo against
 Claude/Copilot.
+
+Six verbs cover the loop:
+
+- **scan** finds vulnerable deps, code/IaC flaws, malware and secrets locally.
+- **harden** drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot,
+  CodeQL and PR templates into a repo so the next commit is clean.
+- **agent** installs the SecKit prompt as a Claude subagent, Copilot chat
+  mode, Cursor rule or `AGENTS.md` section, so any AI assistant can run the
+  same playbook without the shell scripts.
+- **mcp** wires the official MCP servers (Semgrep, Snyk, OSV, Trivy,
+  Scorecard, plus GitHub / ADO / Atlassian / Microsoft Learn / Terraform /
+  Foundry) into Claude, Copilot or Cursor.
+- **audit** is the read-only posture check against GitHub or Azure DevOps.
+  Safe to run in any customer environment.
+- **enforce** writes the missing settings flagged by `audit`. Dry-run by
+  default; pass `--apply` / `-Apply` to actually write.
 
 More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE)
 

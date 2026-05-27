@@ -1,0 +1,8 @@
+---
+description: SecKit security pre-flight agent
+globs:
+alwaysApply: false
+---
+
+<!-- AUTO-GENERATED FROM templates/seckit-agent.md - do not edit by hand. Run `seckit agent install --target cursor` to refresh. -->
+
