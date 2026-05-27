@@ -42,7 +42,8 @@ $Tools = @(
   'trufflehog|scanner: secrets in files|brew install trufflehog',
   'semgrep|scanner: code vulns (SQLi, XSS, CSRF)|brew install semgrep',
   'checkov|scanner: IaC misconfig (Bicep, Terraform, Actions)|brew install checkov',
-  'socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli'
+  'socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli',
+  'pre-commit|gate: runs gitleaks before each commit|brew install pre-commit'
 )
 
 function Invoke-Doctor {
@@ -79,7 +80,7 @@ function Invoke-Reminders {
 function Show-Status {
   $r = Get-Reminders
   $n = 0; $ok = 0
-  foreach ($t in 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov', 'socket') { $n++; if (Have $t) { $ok++ } }
+  foreach ($t in 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov', 'socket', 'pre-commit') { $n++; if (Have $t) { $ok++ } }
   if ($r) {
     $t, $a = Split-Reminder $r[(Get-Random -Maximum $r.Count)]
     Write-Host '[reminder] ' -ForegroundColor White -NoNewline; Write-Host $t
@@ -97,7 +98,7 @@ function Invoke-Startup { Show-Status }
 function Invoke-Install {
   param([switch]$All)
   Write-Host 'Install scanners' -ForegroundColor White
-  $tools = 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov', 'socket'
+  $tools = 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov', 'socket', 'pre-commit'
   $missing = @($tools | Where-Object { -not (Have $_) })
   if (-not $missing) { Write-Host 'All scanners already installed.' -ForegroundColor Green; return }
 
@@ -132,6 +133,11 @@ function Invoke-Install {
       'socket' {
         if (Have npm) { Write-Host '+ npm i -g @socketsecurity/cli'; npm i -g @socketsecurity/cli }
         else { Write-Host 'socket (optional) needs npm.' -ForegroundColor DarkGray }
+      }
+      'pre-commit' {
+        if (Have pipx) { Write-Host '+ pipx install pre-commit'; pipx install pre-commit }
+        elseif (Have pip) { Write-Host '+ pip install pre-commit'; pip install pre-commit }
+        else { Write-Host 'pre-commit needs Python (pipx or pip).' -ForegroundColor Yellow }
       }
       default { $scoopPkgs += $t }
     }

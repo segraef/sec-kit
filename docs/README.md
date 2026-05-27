@@ -17,8 +17,8 @@ pwsh ./seckit.ps1 install     # Windows: scoop + pipx + npm
 Or install them by hand:
 
 ```bash
-brew install osv-scanner gitleaks trufflehog semgrep checkov   # macOS / Linux
-# Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install checkov
+brew install osv-scanner gitleaks trufflehog semgrep checkov pre-commit   # macOS / Linux
+# Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install checkov pre-commit
 npm i -g @socketsecurity/cli                                    # only for socket
 ```
 
@@ -50,6 +50,7 @@ shows what is present and how to install the rest.
 | `semgrep` | code-level vulnerabilities (SQLi, XSS, CSRF, injection) | network (fetches rules) |
 | `checkov` | infrastructure-as-code misconfig (Bicep, Terraform, Actions, Docker, K8s) | - |
 | `socket` (opt-in) | malicious package *behaviour*, not just CVEs | `npm` |
+| `pre-commit` | runs the gitleaks gate before every `git commit` | activated by `seckit harden` |
 
 ## Scan
 

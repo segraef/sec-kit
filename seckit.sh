@@ -57,6 +57,7 @@ TOOLS=(
   "semgrep|scanner: code vulns (SQLi, XSS, CSRF)|brew install semgrep"
   "checkov|scanner: IaC misconfig (Bicep, Terraform, Actions)|brew install checkov"
   "socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli"
+  "pre-commit|gate: runs gitleaks before each commit|brew install pre-commit"
 )
 
 cmd_doctor() {
@@ -87,7 +88,7 @@ cmd_install() {
   for a in "$@"; do case "$a" in --all|-y|--yes) yes=1 ;; esac; done
 
   echo "${BOLD}Install scanners${RST}"
-  local all=(osv-scanner gitleaks trufflehog semgrep checkov socket) missing=() t
+  local all=(osv-scanner gitleaks trufflehog semgrep checkov socket pre-commit) missing=() t
   for t in "${all[@]}"; do have "$t" || missing+=("$t"); done
   if (( ${#missing[@]} == 0 )); then
     echo "${GRN}All scanners already installed.${RST}"; return 0
@@ -397,6 +398,22 @@ cmd_harden() {
   # gitleaks pre-commit gate (blocks any secret before it commits).
   _h_put "$root/.pre-commit-config.yaml" "$TPL/pre-commit-config.yaml"
   _h_put "$root/.gitleaks.toml"          "$TPL/gitleaks.toml"
+
+  # Activate the hook so it actually runs on `git commit`. Dropping the
+  # template is not enough - pre-commit needs to write .git/hooks/pre-commit.
+  if git -C "$root" rev-parse >/dev/null 2>&1; then
+    if have pre-commit; then
+      if [[ -f "$root/.git/hooks/pre-commit" ]] && grep -q 'pre-commit' "$root/.git/hooks/pre-commit" 2>/dev/null; then
+        echo "  ${DIM}ok: pre-commit hook already installed${RST}"
+      else
+        (cd "$root" && pre-commit install >/dev/null 2>&1) \
+          && echo "  ${GRN}installed${RST} .git/hooks/pre-commit" \
+          || echo "  ${YEL}warn${RST} pre-commit install failed (run manually in $root)"
+      fi
+    else
+      echo "  ${YEL}skip${RST} pre-commit not installed - run ${BOLD}seckit install${RST} then ${BOLD}pre-commit install${RST} in this repo"
+    fi
+  fi
 
   # Warn if a secret file is already tracked by git.
   if git -C "$root" rev-parse >/dev/null 2>&1; then
