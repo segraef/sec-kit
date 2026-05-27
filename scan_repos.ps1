@@ -43,8 +43,16 @@ if (-not (Test-Path -PathType Container $Root)) {
 $Root = (Resolve-Path $Root).Path
 
 # ---------- Tool availability ----------------------------------------------
+# Tracked for the end-of-scan report.
+$ScannersAll     = @('osv-scanner','gitleaks','trufflehog','semgrep','checkov','socket')
+$ScannersRun     = @()
+$ScannersSkipped = @()
 $missing = @()
-foreach ($t in 'osv-scanner', 'gitleaks', 'trufflehog', 'semgrep', 'checkov') { if (-not (Have $t)) { $missing += $t } }
+foreach ($t in $ScannersAll) {
+  if ($t -eq 'socket' -and -not $Socket) { $ScannersSkipped += 'socket (opt-in via -Socket)'; continue }
+  if (-not (Have $t)) { $missing += $t; $ScannersSkipped += "$t (not installed)"; continue }
+  $ScannersRun += $t
+}
 if ($missing.Count) {
   Write-Host "Missing tools (skipped): $($missing -join ', ')" -ForegroundColor Yellow
   Write-Host "Install: brew install $($missing -join ' ')  (or scoop install ... on Windows)" -ForegroundColor DarkGray
@@ -68,6 +76,27 @@ if (-not $repos) { Write-Host "No repositories found under $Root"; exit 0 }
 Write-Host "Scanning $($repos.Count) repo(s) under $Root" -ForegroundColor White
 Write-Host ""
 
+# ---------- Report scaffolding ---------------------------------------------
+$RunTs      = Get-Date -Format 'yyyyMMdd-HHmmss'
+$LogDir     = Join-Path ([System.IO.Path]::GetTempPath()) ("seckit-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$ReportDir  = if ($env:SECKIT_REPORT_DIR) { $env:SECKIT_REPORT_DIR } else { Join-Path $HOME '.seckit/reports' }
+$ReportFile = Join-Path $ReportDir "scan-$RunTs.md"
+New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
+
+# Result rows: PSCustomObjects with Scanner, Repo, ExitCode, Log.
+$Results = New-Object System.Collections.Generic.List[object]
+
+function Invoke-Scan {
+  param([string]$Key, [string]$Repo, [scriptblock]$Cmd)
+  $safe = ($Repo -replace '[\\/ .]', '_')
+  $log  = Join-Path $LogDir "${Key}__${safe}.log"
+  & $Cmd 2>&1 | Tee-Object -FilePath $log
+  $rc = $LASTEXITCODE
+  $Results.Add([pscustomobject]@{ Scanner=$Key; Repo=$Repo; ExitCode=$rc; Log=$log })
+  return $rc
+}
+
 # ---------- Scan loop -------------------------------------------------------
 $flagged = 0
 foreach ($repo in $repos) {
@@ -76,34 +105,37 @@ foreach ($repo in $repos) {
 
   if (Have osv-scanner) {
     Write-Host "- osv-scanner (vulnerable deps)" -ForegroundColor DarkGray
-    & osv-scanner -r $repo
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    $rc = Invoke-Scan -Key 'osv' -Repo $repo -Cmd { & osv-scanner -r $repo }
+    if ($rc -ne 0) { $hit = $true }
   }
   if ($gl) {
     Write-Host "- gitleaks (secrets in git history)" -ForegroundColor DarkGray
-    if ($gl -eq 'git') { & gitleaks git $repo --redact --no-banner }
-    else { & gitleaks detect --source $repo --redact --no-banner }
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    if ($gl -eq 'git') {
+      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks git $repo --redact --no-banner }
+    } else {
+      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks detect --source $repo --redact --no-banner }
+    }
+    if ($rc -ne 0) { $hit = $true }
   }
   if (Have trufflehog) {
     Write-Host "- trufflehog (secrets in files)" -ForegroundColor DarkGray
-    & trufflehog filesystem $repo --no-update --fail 2> $null
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    $rc = Invoke-Scan -Key 'trufflehog' -Repo $repo -Cmd { & trufflehog filesystem $repo --no-update --fail 2> $null }
+    if ($rc -ne 0) { $hit = $true }
   }
   if (Have semgrep) {
     Write-Host "- semgrep (code vulns: SQLi, XSS, CSRF)" -ForegroundColor DarkGray
-    & semgrep scan --config auto --error --quiet $repo
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    $rc = Invoke-Scan -Key 'semgrep' -Repo $repo -Cmd { & semgrep scan --config auto --error --quiet $repo }
+    if ($rc -ne 0) { $hit = $true }
   }
   if (Have checkov) {
     Write-Host "- checkov (IaC misconfig)" -ForegroundColor DarkGray
-    & checkov -d $repo --quiet --compact --skip-path node_modules
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    $rc = Invoke-Scan -Key 'checkov' -Repo $repo -Cmd { & checkov -d $repo --quiet --compact --skip-path node_modules }
+    if ($rc -ne 0) { $hit = $true }
   }
   if ($Socket -and (Have socket)) {
     Write-Host "- socket (malicious packages)" -ForegroundColor DarkGray
-    & socket scan create $repo
-    if ($LASTEXITCODE -ne 0) { $hit = $true }
+    $rc = Invoke-Scan -Key 'socket' -Repo $repo -Cmd { & socket scan create $repo }
+    if ($rc -ne 0) { $hit = $true }
   }
 
   if ($hit) { Write-Host "  findings in $repo" -ForegroundColor Red; $flagged++ }
@@ -112,4 +144,154 @@ foreach ($repo in $repos) {
 }
 
 Write-Host "Done. $flagged of $($repos.Count) repo(s) need attention." -ForegroundColor White
+
+# ---------- End-of-scan report --------------------------------------------
+function Get-FindingCount {
+  param([string]$Key, [string]$Log)
+  if (-not (Test-Path $Log)) { return '?' }
+  $text = Get-Content $Log -Raw -ErrorAction SilentlyContinue
+  if (-not $text) { return 0 }
+  switch ($Key) {
+    'osv'        { return ([regex]::Matches($text, '(CVE-|GHSA-)[0-9A-Za-z-]+')).Count }
+    'gitleaks'   {
+      if ($text -match 'no leaks found') { return 0 }
+      $m = [regex]::Match($text, '([0-9]+)\s+leaks?\s+found')
+      if ($m.Success) { return [int]$m.Groups[1].Value } else { return 0 }
+    }
+    'trufflehog' { return ([regex]::Matches($text, '(?m)^(Found |Reason:)')).Count }
+    'semgrep'    {
+      $m = [regex]::Match($text, '([0-9]+)\s+Code Finding')
+      if ($m.Success) { return [int]$m.Groups[1].Value } else { return 0 }
+    }
+    'checkov'    {
+      $m = [regex]::Match($text, 'Failed checks:\s+([0-9]+)')
+      if ($m.Success) { return [int]$m.Groups[1].Value } else { return 0 }
+    }
+    default      { return '?' }
+  }
+}
+
+function Test-IsCleanWarning {
+  param([string]$Key, [string]$Log)
+  if (-not (Test-Path $Log)) { return $false }
+  $text = Get-Content $Log -Raw -ErrorAction SilentlyContinue
+  if (-not $text) { return $false }
+  switch ($Key) {
+    'osv'      { return ($text -match 'No package sources found') }
+    'gitleaks' { return ($text -match 'no leaks found') }
+  }
+  return $false
+}
+
+function Get-AgentPrompt {
+  $sb = [System.Text.StringBuilder]::new()
+  [void]$sb.AppendLine('You are a security engineer. SecKit scanned this repository and reported the')
+  [void]$sb.AppendLine('findings below. For each finding:')
+  [void]$sb.AppendLine('  1. Explain the risk in one sentence (cite the CWE/CVE if applicable).')
+  [void]$sb.AppendLine('  2. Propose the minimal idiomatic fix with the exact file path and a diff.')
+  [void]$sb.AppendLine('  3. Suggest the smallest reasonable verification.')
+  [void]$sb.AppendLine('Do not refactor unrelated code. Prefer secure defaults over suppressions.')
+  [void]$sb.AppendLine()
+  $findings = $Results | Where-Object { $_.ExitCode -ne 0 -and -not (Test-IsCleanWarning -Key $_.Scanner -Log $_.Log) }
+  if (-not $findings) { [void]$sb.AppendLine('(no findings - all scanners clean)'); return $sb.ToString() }
+  $prev = ''
+  foreach ($r in $findings) {
+    if ($r.Repo -ne $prev) {
+      [void]$sb.AppendLine("== Repo: $($r.Repo) ==")
+      [void]$sb.AppendLine()
+      $prev = $r.Repo
+    }
+    [void]$sb.AppendLine("[$($r.Scanner)]")
+    if (Test-Path $r.Log) {
+      $lines = Get-Content $r.Log -TotalCount 80
+      foreach ($l in $lines) { [void]$sb.AppendLine($l) }
+    }
+    [void]$sb.AppendLine()
+  }
+  return $sb.ToString()
+}
+
+# Markdown report on disk.
+$md = [System.Text.StringBuilder]::new()
+[void]$md.AppendLine('# SecKit scan report')
+[void]$md.AppendLine()
+[void]$md.AppendLine("_$([datetime]::Now.ToString('u'))_  ")
+[void]$md.AppendLine("**Root:** ``$Root``")
+[void]$md.AppendLine()
+[void]$md.AppendLine('## Scanners')
+[void]$md.AppendLine()
+if ($ScannersRun.Count) {
+  $runList = ($ScannersRun | ForEach-Object { '`' + $_ + '`' }) -join ' '
+  [void]$md.AppendLine("**Ran:** $runList")
+} else {
+  [void]$md.AppendLine('**Ran:** _(none)_')
+}
+if ($ScannersSkipped.Count) {
+  [void]$md.AppendLine(); [void]$md.AppendLine('**Skipped:**'); [void]$md.AppendLine()
+  foreach ($s in $ScannersSkipped) { [void]$md.AppendLine("- $s") }
+}
+[void]$md.AppendLine()
+[void]$md.AppendLine('## Findings')
+$any = $false
+foreach ($r in $repos) {
+  $rows = $Results | Where-Object { $_.Repo -eq $r -and $_.ExitCode -ne 0 -and -not (Test-IsCleanWarning -Key $_.Scanner -Log $_.Log) }
+  if ($rows) {
+    $any = $true
+    [void]$md.AppendLine(); [void]$md.AppendLine("### ``$r``")
+    foreach ($row in $rows) {
+      $n = Get-FindingCount -Key $row.Scanner -Log $row.Log
+      [void]$md.AppendLine(); [void]$md.AppendLine("#### $($row.Scanner) - $n finding(s)"); [void]$md.AppendLine(); [void]$md.AppendLine('```')
+      if (Test-Path $row.Log) { Get-Content $row.Log -TotalCount 200 | ForEach-Object { [void]$md.AppendLine($_) } }
+      [void]$md.AppendLine('```')
+    }
+  }
+}
+if (-not $any) { [void]$md.AppendLine(); [void]$md.AppendLine('_All clean._') }
+[void]$md.AppendLine()
+[void]$md.AppendLine('## AI agent prompt')
+[void]$md.AppendLine()
+[void]$md.AppendLine('Paste this into your AI agent to triage and fix the findings above.')
+[void]$md.AppendLine()
+[void]$md.AppendLine('```')
+[void]$md.Append((Get-AgentPrompt))
+[void]$md.AppendLine('```')
+Set-Content -Path $ReportFile -Value $md.ToString() -Encoding UTF8
+
+# Terminal summary.
+Write-Host ''
+Write-Host '========================================' -ForegroundColor White
+Write-Host '  Scan report' -ForegroundColor White
+Write-Host '========================================' -ForegroundColor White
+Write-Host ''
+Write-Host 'Scanners' -ForegroundColor White
+if ($ScannersRun.Count)     { Write-Host "  ran:     $($ScannersRun -join ' ')" }
+else                         { Write-Host '  ran:     (none)' -ForegroundColor DarkGray }
+foreach ($s in $ScannersSkipped) { Write-Host "  skipped: $s" -ForegroundColor DarkGray }
+Write-Host ''
+Write-Host 'Findings' -ForegroundColor White
+$any = $false
+foreach ($r in $repos) {
+  $rows = $Results | Where-Object { $_.Repo -eq $r -and $_.ExitCode -ne 0 -and -not (Test-IsCleanWarning -Key $_.Scanner -Log $_.Log) }
+  if ($rows) {
+    $any = $true
+    Write-Host "  $r"
+    foreach ($row in $rows) {
+      $n = Get-FindingCount -Key $row.Scanner -Log $row.Log
+      Write-Host ("    {0,-10} {1} finding(s)" -f $row.Scanner, $n) -ForegroundColor Yellow
+    }
+  }
+}
+if (-not $any) { Write-Host '  (clean)' -ForegroundColor Green }
+Write-Host ''
+Write-Host "Full report: $ReportFile" -ForegroundColor White
+
+if ($flagged -gt 0) {
+  Write-Host ''
+  Write-Host 'Copy/paste prompt for your AI agent' -ForegroundColor White
+  Write-Host '--- begin prompt -----------------------------------------' -ForegroundColor DarkGray
+  Write-Host (Get-AgentPrompt)
+  Write-Host '--- end prompt -------------------------------------------' -ForegroundColor DarkGray
+}
+
+Remove-Item -Recurse -Force $LogDir -ErrorAction SilentlyContinue
 if ($flagged -gt 0) { exit 1 } else { exit 0 }

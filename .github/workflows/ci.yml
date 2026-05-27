@@ -1,0 +1,85 @@
+# Runs the same scanners SecKit ships with against the kit itself. Acts as
+# both a CI gate and a worked example users can copy.
+#
+# Hardening notes:
+# - For stricter setups, pin every `uses:` ref to a full commit SHA and let
+#   dependabot bump them. We use @vN tags here so the example stays readable.
+# - `permissions:` is read-only; widen per-job only when a job truly needs it.
+# - The gitleaks job needs full history (fetch-depth: 0).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: shellcheck -S warning banner.sh seckit.sh scan_repos.sh
+
+  psscriptanalyzer:
+    name: PSScriptAnalyzer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint PowerShell scripts
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $exclude = @('PSAvoidUsingWriteHost','PSUseSingularNouns')
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse `
+            -Severity Error,Warning -ExcludeRule $exclude
+          if ($findings) {
+            $findings | Format-Table -AutoSize
+            throw "PSScriptAnalyzer found $($findings.Count) issue(s)"
+          }
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: SAST scan
+        run: semgrep scan --config auto --error --quiet .
+
+  checkov:
+    name: checkov
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: IaC scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          quiet: true
+          soft_fail: false
+          skip_path: templates

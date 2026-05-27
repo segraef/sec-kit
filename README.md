@@ -5,7 +5,9 @@
 <p align="center">Your portable security pre-flight kit. Run it before you work in any repo.</p>
 
 <p align="center">
-  <a href="https://github.com/segraef/sec-kit/actions/workflows/linter.yml"><img src="https://github.com/segraef/sec-kit/actions/workflows/linter.yml/badge.svg" alt="Super Linter"></a>
+  <a href="https://github.com/segraef/sec-kit/actions/workflows/ci.yml"><img src="https://github.com/segraef/sec-kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/segraef/sec-kit/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/badge/scanned%20with-SecKit-1f6feb" alt="Scanned with SecKit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
 </p>
 
 ## Quick start

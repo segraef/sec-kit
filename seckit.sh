@@ -211,7 +211,7 @@ cmd_menu() {
   type banner >/dev/null 2>&1 && banner
   print_status
   echo
-  local choice dir sk
+  local choice dir
   while true; do
     echo "${BOLD}SecKit${RST} - choose an action"
     echo "  ${GRN}1${RST}) doctor      ${DIM}check your tools are installed${RST}"

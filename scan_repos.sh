@@ -71,10 +71,30 @@ for t in ${ONLY//,/ } ${SKIP//,/ }; do
 done
 
 # ---------- Tool availability (only the enabled scanners) -------------------
+# Builds two lists used both for the live run and the end-of-scan report:
+#   SCANNERS_RUN     - scanners that will actually execute
+#   SCANNERS_SKIPPED - human-readable "name (reason)" strings
+SCANNERS_RUN=()
+SCANNERS_SKIPPED=()
 missing=()
 for t in osv gitleaks trufflehog semgrep checkov socket; do
-  want "$t" || continue
-  b="$(bin_of "$t")"; have "$b" || missing+=("$b")
+  if ! want "$t"; then
+    if [[ "$t" == socket && $RUN_SOCKET -eq 0 && -z "$ONLY" ]]; then
+      SCANNERS_SKIPPED+=("socket (opt-in via --socket)")
+    elif [[ -n "$ONLY" ]] && ! in_list "$t" "$ONLY"; then
+      :  # deselected by --only - skip silently to avoid clutter
+    elif in_list "$t" "$SKIP"; then
+      SCANNERS_SKIPPED+=("$t (excluded by --skip)")
+    fi
+    continue
+  fi
+  b="$(bin_of "$t")"
+  if ! have "$b"; then
+    SCANNERS_SKIPPED+=("$t (not installed: $b)")
+    missing+=("$b")
+    continue
+  fi
+  SCANNERS_RUN+=("$t")
 done
 if (( ${#missing[@]} )); then
   echo "${YEL}Missing tools (skipped): ${missing[*]}${RST}"
@@ -109,6 +129,65 @@ fi
 echo "${BOLD}Scanning ${#repos[@]} repo(s) under ${ROOT}${RST}"
 echo
 
+# ---------- Report scaffolding ---------------------------------------------
+# Each scanner's stdout/stderr is teed to a per-(scanner, repo) log file so
+# the end-of-scan report can show what was found without re-running anything.
+# The report itself is written outside the scanned tree to avoid leaking
+# redacted-but-still-sensitive output back into a repo.
+RUN_TS="$(date +%Y%m%d-%H%M%S)"
+LOG_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t seckit)"
+trap 'rm -rf "$LOG_DIR" 2>/dev/null || true' EXIT
+REPORT_DIR="${SECKIT_REPORT_DIR:-$HOME/.seckit/reports}"
+REPORT_FILE="${REPORT_DIR}/scan-${RUN_TS}.md"
+mkdir -p "$REPORT_DIR"
+
+# Result rows accumulated during the scan: "scanner|repo|rc|log_path".
+RESULTS=()
+
+# Tee a scanner command into a log and remember its exit code.
+# Uses PIPESTATUS so tee's exit code does not mask the scanner's.
+run_scan() {
+  local key="$1" repo="$2"; shift 2
+  local safe; safe="$(printf '%s' "$repo" | tr '/ .' '___')"
+  local log="$LOG_DIR/${key}__${safe}.log"
+  set +o pipefail
+  "$@" 2>&1 | tee "$log"
+  local rc=${PIPESTATUS[0]}
+  set -o pipefail
+  RESULTS+=("$key|$repo|$rc|$log")
+  return $rc
+}
+
+# trufflehog: keep findings (stdout) but drop noisy progress (stderr).
+_seckit_trufflehog() {
+  trufflehog filesystem "$1" --no-update --fail 2>/dev/null
+}
+
+# Some scanners exit non-zero on conditions that are not real findings
+# (e.g. osv-scanner: "No package sources found"). Treat those as clean so
+# the summary line and the report agree.
+seckit_is_clean_warning() {
+  local key="$1" log="$2"
+  [[ -f "$log" ]] || return 1
+  case "$key" in
+    osv)      grep -q 'No package sources found' "$log" && return 0 ;;
+    gitleaks) grep -q 'no leaks found' "$log" && return 0 ;;
+  esac
+  return 1
+}
+
+# Wrap run_scan to also reflect the clean-warning filter in $hit.
+_seckit_run_and_count() {
+  local key="$1" repo="$2"; shift 2
+  if ! run_scan "$key" "$repo" "$@"; then
+    local last="${RESULTS[$((${#RESULTS[@]} - 1))]}"
+    local lg="${last##*|}"
+    seckit_is_clean_warning "$key" "$lg" && return 0
+    return 1
+  fi
+  return 0
+}
+
 # ---------- Scan loop -------------------------------------------------------
 flagged=0
 for repo in "${repos[@]}"; do
@@ -117,36 +196,36 @@ for repo in "${repos[@]}"; do
 
   if want osv && have osv-scanner; then
     echo "${DIM}- osv-scanner (vulnerable deps)${RST}"
-    osv-scanner -r "$repo" || hit=1
+    _seckit_run_and_count osv "$repo" osv-scanner -r "$repo" || hit=1
   fi
 
   if want gitleaks && [[ -n "$GL" ]]; then
     echo "${DIM}- gitleaks (secrets in git history)${RST}"
     if [[ "$GL" == "git" ]]; then
-      gitleaks git "$repo" --redact --no-banner || hit=1
+      _seckit_run_and_count gitleaks "$repo" gitleaks git "$repo" --redact --no-banner || hit=1
     else
-      gitleaks detect --source "$repo" --redact --no-banner || hit=1
+      _seckit_run_and_count gitleaks "$repo" gitleaks detect --source "$repo" --redact --no-banner || hit=1
     fi
   fi
 
   if want trufflehog && have trufflehog; then
     echo "${DIM}- trufflehog (secrets in files)${RST}"
-    trufflehog filesystem "$repo" --no-update --fail 2>/dev/null || hit=1
+    _seckit_run_and_count trufflehog "$repo" _seckit_trufflehog "$repo" || hit=1
   fi
 
   if want semgrep && have semgrep; then
     echo "${DIM}- semgrep (code vulns: SQLi, XSS, CSRF)${RST}"
-    semgrep scan --config auto --error --quiet "$repo" || hit=1
+    _seckit_run_and_count semgrep "$repo" semgrep scan --config auto --error --quiet "$repo" || hit=1
   fi
 
   if want checkov && have checkov; then
     echo "${DIM}- checkov (IaC misconfig)${RST}"
-    checkov -d "$repo" --quiet --compact --skip-path node_modules || hit=1
+    _seckit_run_and_count checkov "$repo" checkov -d "$repo" --quiet --compact --skip-path node_modules || hit=1
   fi
 
   if want socket && have socket; then
     echo "${DIM}- socket (malicious packages)${RST}"
-    socket scan create "$repo" || hit=1
+    _seckit_run_and_count socket "$repo" socket scan create "$repo" || hit=1
   fi
 
   if (( hit )); then
@@ -159,4 +238,166 @@ for repo in "${repos[@]}"; do
 done
 
 echo "${BOLD}Done.${RST} ${flagged} of ${#repos[@]} repo(s) need attention."
+
+# ---------- End-of-scan report ---------------------------------------------
+# Pull a rough finding count from each scanner's log so the summary has a
+# number to show. Scanner output formats change - treat counts as advisory.
+seckit_count() {
+  local key="$1" log="$2" n=""
+  [[ -f "$log" ]] || { printf '?'; return; }
+  case "$key" in
+    osv)
+      n="$(grep -cE '(CVE-|GHSA-)[0-9A-Za-z-]+' "$log" 2>/dev/null || true)" ;;
+    gitleaks)
+      if grep -q 'no leaks found' "$log" 2>/dev/null; then n=0
+      else n="$(grep -oE '[0-9]+ leaks? found' "$log" 2>/dev/null | head -1 | awk '{print $1}')"
+      fi ;;
+    trufflehog)
+      n="$(grep -cE '^(Found |✓|Reason:)' "$log" 2>/dev/null || true)" ;;
+    semgrep)
+      n="$(grep -oE '[0-9]+ Code Finding' "$log" 2>/dev/null | head -1 | awk '{print $1}')" ;;
+    checkov)
+      n="$(grep -oE 'Failed checks: [0-9]+' "$log" 2>/dev/null | head -1 | awk '{print $3}')" ;;
+    socket)
+      n="?" ;;
+  esac
+  [[ -z "$n" ]] && n=0
+  printf '%s' "$n"
+}
+
+# A non-zero exit code does not always mean "found something". Some scanners
+# also fail when there is nothing to scan (e.g. osv: "No package sources").
+# The shared check is defined earlier so the inline scan loop and the report
+# agree about what counts as a finding.
+
+# Self-contained instruction block that ships with each report.
+emit_agent_prompt() {
+  cat <<'PROMPT_HEAD'
+You are a security engineer. SecKit scanned this repository and reported the
+findings below. For each finding:
+  1. Explain the risk in one sentence (cite the CWE/CVE if applicable).
+  2. Propose the minimal idiomatic fix with the exact file path and a diff.
+  3. Suggest the smallest reasonable verification.
+Do not refactor unrelated code. Prefer secure defaults over suppressions.
+
+PROMPT_HEAD
+  local row k r rc lg shown=0 prev_repo=""
+  if (( ${#RESULTS[@]} == 0 )); then
+    printf '(no scanners ran)\n'; return
+  fi
+  for row in "${RESULTS[@]}"; do
+    IFS='|' read -r k r rc lg <<< "$row"
+    (( rc == 0 )) && continue
+    seckit_is_clean_warning "$k" "$lg" && continue
+    if [[ "$r" != "$prev_repo" ]]; then
+      printf '== Repo: %s ==\n\n' "$r"
+      prev_repo="$r"
+    fi
+    printf '[%s]\n' "$k"
+    [[ -f "$lg" ]] && head -80 "$lg"
+    printf '\n'
+    shown=1
+  done
+  (( shown == 0 )) && printf '(no findings - all scanners clean)\n'
+}
+
+# Write the full markdown report to ~/.seckit/reports.
+{
+  printf '# SecKit scan report\n\n'
+  printf '_%s_  \n' "$(date)"
+  printf '**Root:** `%s`\n\n' "$ROOT"
+
+  printf '## Scanners\n\n'
+  if (( ${#SCANNERS_RUN[@]} )); then
+    printf '**Ran:** '
+    printf '`%s` ' "${SCANNERS_RUN[@]}"
+    printf '\n\n'
+  else
+    printf '**Ran:** _(none)_\n\n'
+  fi
+  if (( ${#SCANNERS_SKIPPED[@]} )); then
+    printf '**Skipped:**\n\n'
+    for s in "${SCANNERS_SKIPPED[@]}"; do printf '- %s\n' "$s"; done
+    printf '\n'
+  fi
+
+  printf '## Findings\n'
+  any=0
+  for repo in "${repos[@]}"; do
+    has=0
+    if (( ${#RESULTS[@]} )); then
+      for row in "${RESULTS[@]}"; do
+        IFS='|' read -r k r rc lg <<< "$row"
+        [[ "$r" == "$repo" ]] || continue
+        (( rc == 0 )) && continue
+        seckit_is_clean_warning "$k" "$lg" && continue
+        if (( has == 0 )); then
+          printf '\n### `%s`\n' "$repo"
+          has=1; any=1
+        fi
+        n="$(seckit_count "$k" "$lg")"
+        printf '\n#### %s - %s finding(s)\n\n```\n' "$k" "$n"
+        [[ -f "$lg" ]] && head -200 "$lg"
+        printf '```\n'
+      done
+    fi
+  done
+  (( any == 0 )) && printf '\n_All clean._\n'
+
+  printf '\n## AI agent prompt\n\n'
+  printf 'Paste this into your AI agent to triage and fix the findings above.\n\n'
+  printf '```\n'
+  emit_agent_prompt
+  printf '```\n'
+} > "$REPORT_FILE" 2>/dev/null
+
+# Compact terminal summary + copy-pasteable prompt.
+echo
+echo "${BOLD}========================================${RST}"
+echo "${BOLD}  Scan report${RST}"
+echo "${BOLD}========================================${RST}"
+echo
+echo "${BOLD}Scanners${RST}"
+if (( ${#SCANNERS_RUN[@]} )); then
+  echo "  ran:     ${SCANNERS_RUN[*]}"
+else
+  echo "  ran:     ${DIM}(none)${RST}"
+fi
+if (( ${#SCANNERS_SKIPPED[@]} )); then
+  for s in "${SCANNERS_SKIPPED[@]}"; do
+    echo "  skipped: ${DIM}${s}${RST}"
+  done
+fi
+echo
+echo "${BOLD}Findings${RST}"
+any=0
+for repo in "${repos[@]}"; do
+  has=0
+  if (( ${#RESULTS[@]} )); then
+    for row in "${RESULTS[@]}"; do
+      IFS='|' read -r k r rc lg <<< "$row"
+      [[ "$r" == "$repo" ]] || continue
+      (( rc == 0 )) && continue
+      seckit_is_clean_warning "$k" "$lg" && continue
+      if (( has == 0 )); then
+        echo "  ${repo}"
+        has=1; any=1
+      fi
+      n="$(seckit_count "$k" "$lg")"
+      printf '    %s%-10s%s %s finding(s)\n' "$YEL" "$k" "$RST" "$n"
+    done
+  fi
+done
+(( any == 0 )) && echo "  ${GRN}(clean)${RST}"
+echo
+echo "${BOLD}Full report:${RST} $REPORT_FILE"
+
+if (( flagged > 0 )); then
+  echo
+  echo "${BOLD}Copy/paste prompt for your AI agent${RST}"
+  echo "${DIM}--- begin prompt -----------------------------------------${RST}"
+  emit_agent_prompt
+  echo "${DIM}--- end prompt -------------------------------------------${RST}"
+fi
+
 (( flagged == 0 )) || exit 1
