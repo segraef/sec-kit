@@ -256,13 +256,13 @@ cmd_menu() {
       1|doctor)     cmd_doctor ;;
       2|install)    cmd_install ;;
       3|scan)
-        printf 'Directory to scan [~/Git] (b=back): '; read -r dir
+        printf 'Directory to scan [%s~/Git%s] (b to back): ' "$DIM" "$RST"; read -r dir
         if [[ "$dir" == b || "$dir" == back ]]; then echo; continue; fi
         dir="${dir:-$HOME/Git}"; dir="${dir/#\~/$HOME}"
         local scanners=(osv gitleaks trufflehog semgrep checkov socket) si pick only=""
-        echo "Scanners:"
+        echo "${BOLD}Pick scanners${RST}"
         for si in "${!scanners[@]}"; do printf '  %s%d%s) %s\n' "$GRN" "$((si + 1))" "$RST" "${scanners[$si]}"; done
-        printf 'Run which? [a]ll (no socket), numbers (e.g. 1 2 3), or Enter for all: '
+        printf 'Select [%sa%s for all (no socket), numbers, Enter = all]: ' "$GRN" "$RST"
         read -r pick
         case "$pick" in
           ""|a|A|all) bash "$HERE/scan_repos.sh" "$dir" ;;
@@ -279,45 +279,59 @@ cmd_menu() {
       4|harden)     cmd_harden ;;
       5|agent)      cmd_agent install ;;
       6|mcp)
-        echo "Pick: l)ist  i)nstall  d)octor  b)ack"
-        printf 'Choice: '; read -r mc
+        echo "${BOLD}MCP${RST} - pick an action"
+        echo "  ${GRN}1${RST}) list      ${DIM}show every server, grouped by pack${RST}"
+        echo "  ${GRN}2${RST}) install   ${DIM}wire a pack or one server into a client${RST}"
+        echo "  ${GRN}3${RST}) doctor    ${DIM}which clients + env vars are present${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r mc
         case "$mc" in
-          l|list)    bash "$HERE/mcp.sh" list ;;
-          i|install)
-            printf 'Pack [security|enterprise] or server id: '; read -r mp
+          1|l|list)    bash "$HERE/mcp.sh" list ;;
+          2|i|install)
+            printf 'Pack [%ssecurity%s|%senterprise%s] or server id: ' "$GRN" "$RST" "$GRN" "$RST"
+            read -r mp
             [[ -z "$mp" ]] && { echo "Cancelled."; continue; }
             if [[ "$mp" == security || "$mp" == enterprise ]]; then bash "$HERE/mcp.sh" install --pack "$mp"
             else bash "$HERE/mcp.sh" install "$mp"; fi ;;
-          d|doctor)  bash "$HERE/mcp.sh" doctor ;;
-          *)         continue ;;
+          3|d|doctor)  bash "$HERE/mcp.sh" doctor ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
         esac ;;
       7|audit)
-        echo "Platform: g)ithub  a)do  b)ack"
-        printf 'Choice: '; read -r ap
+        echo "${BOLD}Audit${RST} - pick a platform"
+        echo "  ${GRN}1${RST}) github    ${DIM}org or repo (needs gh)${RST}"
+        echo "  ${GRN}2${RST}) ado       ${DIM}project or repo (needs az + AZURE_DEVOPS_EXT_PAT)${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r ap
         case "$ap" in
-          g|github)
-            printf 'Target <org>[/<repo>]: '; read -r at
+          1|g|github)
+            printf 'Target [%sorg%s] or [%sorg/repo%s]: ' "$DIM" "$RST" "$DIM" "$RST"; read -r at
             [[ -n "$at" ]] && bash "$HERE/audit.sh" github "$at" ;;
-          a|ado)
-            printf 'Target <org>/<project>[/<repo>]: '; read -r at
+          2|a|ado)
+            printf 'Target [%sorg/project%s] or [%sorg/project/repo%s]: ' "$DIM" "$RST" "$DIM" "$RST"; read -r at
             [[ -n "$at" ]] && bash "$HERE/audit.sh" ado "$at" ;;
-          *)         continue ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
         esac ;;
       8|enforce)
-        echo "Platform: g)ithub  a)do  b)ack"
-        printf 'Choice: '; read -r ep
+        echo "${BOLD}Enforce${RST} - pick a platform"
+        echo "  ${GRN}1${RST}) github    ${DIM}write GitHub repo settings${RST}"
+        echo "  ${GRN}2${RST}) ado       ${DIM}write ADO repo branch policies${RST}"
+        echo "  ${GRN}b${RST}) back"
+        printf 'Select (b to back): '; read -r ep
         case "$ep" in
-          g|github)
-            printf 'Target <org>/<repo>: '; read -r et
-            printf 'Apply for real? [y/N]: '; read -r ey
+          1|g|github)
+            printf 'Target [%sorg/repo%s]: ' "$DIM" "$RST"; read -r et
+            printf 'Apply for real? [y/%sN%s]: ' "$BOLD" "$RST"; read -r ey
             local apply=""; [[ "$ey" == [yY]* ]] && apply="--apply"
             [[ -n "$et" ]] && bash "$HERE/enforce.sh" github "$et" $apply ;;
-          a|ado)
-            printf 'Target <org>/<project>/<repo>: '; read -r et
-            printf 'Apply for real? [y/N]: '; read -r ey
+          2|a|ado)
+            printf 'Target [%sorg/project/repo%s]: ' "$DIM" "$RST"; read -r et
+            printf 'Apply for real? [y/%sN%s]: ' "$BOLD" "$RST"; read -r ey
             local apply=""; [[ "$ey" == [yY]* ]] && apply="--apply"
             [[ -n "$et" ]] && bash "$HERE/enforce.sh" ado "$et" $apply ;;
-          *)         continue ;;
+          b|back|"")   continue ;;
+          *)           continue ;;
         esac ;;
       9|reminders)  cmd_reminders ;;
       q|Q|quit|exit) break ;;

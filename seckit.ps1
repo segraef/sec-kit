@@ -21,6 +21,10 @@ param(
 $ErrorActionPreference = 'Continue'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Optional animated banner. Loaded once; called from Invoke-Menu / Invoke-Startup.
+$bannerPath = Join-Path $Here 'banner.ps1'
+if (Test-Path $bannerPath) { . $bannerPath }
+
 function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
 function Get-Reminders {
@@ -100,7 +104,10 @@ function Show-Status {
   Write-Host ("  tools: {0}/{1} installed{2}" -f $ok, $n, $note) -ForegroundColor $colour
 }
 
-function Invoke-Startup { Show-Status }
+function Invoke-Startup {
+  if (Get-Command Show-SeckitBanner -ErrorAction SilentlyContinue) { Show-SeckitBanner }
+  Show-Status
+}
 
 # Install the scanners via the platform package manager (scoop / pipx / npm).
 function Invoke-Install {
@@ -274,7 +281,8 @@ seckit - a small, portable security kit you carry between machines.
 
 Reminders live in reminders.txt.
 '@ | Write-Host
-}
+}if (Get-Command Show-SeckitBanner -ErrorAction SilentlyContinue) { Show-SeckitBanner }
+
 
 function Invoke-Menu {
   Show-Status
@@ -297,52 +305,70 @@ function Invoke-Menu {
       { $_ -in '1', 'doctor' }   { Invoke-Doctor }
       { $_ -in '2', 'install' }  { Invoke-Install }
       { $_ -in '3', 'scan' } {
-        $dir = Read-Host 'Directory to scan [~/Git] (b=back)'
+        $dir = Read-Host 'Directory to scan [~/Git] (b to back)'
         if ($dir -notin 'b', 'back') {
           if (-not $dir) { $dir = Join-Path $HOME 'Git' }
           & (Join-Path $Here 'scan_repos.ps1') $dir
         }
       }
       { $_ -in '4', 'harden' } {
-        $dir = Read-Host 'Repo to harden [.] (b=back)'
+        $dir = Read-Host 'Repo to harden [.] (b to back)'
         if ($dir -notin 'b', 'back') { if (-not $dir) { $dir = '.' }; Invoke-Harden -RepoPath $dir }
       }
       { $_ -in '5', 'agent' }    { Invoke-Agent -Sub install -Target '' }
       { $_ -in '6', 'mcp' } {
-        $sub = Read-Host 'mcp: [l]ist, [i]nstall, [d]octor (b=back)'
+        Write-Host 'MCP - pick an action' -ForegroundColor White
+        Write-Host '  1) list      show every server, grouped by pack'
+        Write-Host '  2) install   wire a pack or one server into a client'
+        Write-Host '  3) doctor    which clients + env vars are present'
+        Write-Host '  b) back'
+        $sub = Read-Host 'Select (b to back)'
         switch ($sub) {
-          { $_ -in 'l', 'list' }    { & (Join-Path $Here 'mcp.ps1') list }
-          { $_ -in 'i', 'install' } {
-            $pack = Read-Host 'Pack: security|enterprise|<id>'
+          { $_ -in '1', 'l', 'list' }    { & (Join-Path $Here 'mcp.ps1') list }
+          { $_ -in '2', 'i', 'install' } {
+            $pack = Read-Host 'Pack [security|enterprise] or server id'
             if ($pack -in 'security', 'enterprise') { & (Join-Path $Here 'mcp.ps1') install -Pack $pack }
             elseif ($pack)                          { & (Join-Path $Here 'mcp.ps1') install -Id $pack }
+            else { Write-Host 'Cancelled.' }
           }
-          { $_ -in 'd', 'doctor' }  { & (Join-Path $Here 'mcp.ps1') doctor }
+          { $_ -in '3', 'd', 'doctor' }  { & (Join-Path $Here 'mcp.ps1') doctor }
           default { }
         }
       }
       { $_ -in '7', 'audit' } {
-        $plat = Read-Host 'Platform: [g]ithub or [a]do (b=back)'
-        if ($plat -in 'g', 'github') {
-          $t = Read-Host 'Target (org or org/repo)'
-          if ($t) { & (Join-Path $Here 'audit.ps1') -Platform github -Target $t }
-        }
-        elseif ($plat -in 'a', 'ado') {
-          $t = Read-Host 'Target (org/project or org/project/repo)'
-          if ($t) { & (Join-Path $Here 'audit.ps1') -Platform ado -Target $t }
+        Write-Host 'Audit - pick a platform' -ForegroundColor White
+        Write-Host '  1) github    org or repo (needs gh)'
+        Write-Host '  2) ado       project or repo (needs az + AZURE_DEVOPS_EXT_PAT)'
+        Write-Host '  b) back'
+        $plat = Read-Host 'Select (b to back)'
+        switch ($plat) {
+          { $_ -in '1', 'g', 'github' } {
+            $t = Read-Host 'Target [org] or [org/repo]'
+            if ($t) { & (Join-Path $Here 'audit.ps1') -Platform github -Target $t }
+          }
+          { $_ -in '2', 'a', 'ado' } {
+            $t = Read-Host 'Target [org/project] or [org/project/repo]'
+            if ($t) { & (Join-Path $Here 'audit.ps1') -Platform ado -Target $t }
+          }
+          default { }
         }
       }
       { $_ -in '8', 'enforce' } {
-        $plat = Read-Host 'Platform: [g]ithub or [a]do (b=back)'
-        $apply = Read-Host 'Apply changes? [y/N]'
-        $applyArgs = if ($apply -match '^(y|yes)$') { @('-Apply') } else { @() }
-        if ($plat -in 'g', 'github') {
-          $t = Read-Host 'Target (org/repo)'
-          if ($t) { & (Join-Path $Here 'enforce.ps1') -Platform github -Target $t @applyArgs }
+        Write-Host 'Enforce - pick a platform' -ForegroundColor White
+        Write-Host '  1) github    write GitHub repo settings'
+        Write-Host '  2) ado       write ADO repo branch policies'
+        Write-Host '  b) back'
+        $plat = Read-Host 'Select (b to back)'
+        $target = ''; $kind = ''
+        switch ($plat) {
+          { $_ -in '1', 'g', 'github' } { $kind = 'github'; $target = Read-Host 'Target [org/repo]' }
+          { $_ -in '2', 'a', 'ado' }    { $kind = 'ado';    $target = Read-Host 'Target [org/project/repo]' }
+          default { }
         }
-        elseif ($plat -in 'a', 'ado') {
-          $t = Read-Host 'Target (org/project/repo)'
-          if ($t) { & (Join-Path $Here 'enforce.ps1') -Platform ado -Target $t @applyArgs }
+        if ($kind -and $target) {
+          $apply = Read-Host 'Apply for real? [y/N]'
+          $applyArgs = if ($apply -match '^(y|yes)$') { @('-Apply') } else { @() }
+          & (Join-Path $Here 'enforce.ps1') -Platform $kind -Target $target @applyArgs
         }
       }
       { $_ -in '9', 'reminders' } { Invoke-Reminders }
