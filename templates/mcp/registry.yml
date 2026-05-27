@@ -1,0 +1,110 @@
+# SecKit MCP server registry
+#
+# Two packs: `security` (scanners + advisory data) and `enterprise` (platforms
+# you operate inside). Entries are merged into the active client's MCP config
+# by `seckit mcp install`. Required env vars are listed but never written -
+# the user supplies them out of band.
+#
+# Schema per entry:
+#   id          short slug used on the CLI
+#   pack        security | enterprise
+#   description what the AI gets when this server is installed
+#   transport   stdio | http
+#   command     argv for stdio servers
+#   url         endpoint for http servers
+#   env         list of required environment variable names (documented only)
+#   docs        upstream URL
+
+servers:
+
+  # ---------- Security pack -----------------------------------------------
+
+  - id: semgrep
+    pack: security
+    description: Run Semgrep scans, fetch rule packs, triage findings.
+    transport: stdio
+    command: [uvx, semgrep-mcp]
+    env: []
+    docs: https://github.com/semgrep/mcp
+
+  - id: snyk
+    pack: security
+    description: Query Snyk for SCA, code, and container findings.
+    transport: stdio
+    command: [npx, -y, snyk-mcp]
+    env: [SNYK_TOKEN]
+    docs: https://docs.snyk.io/integrations/snyk-mcp-server
+
+  - id: osv
+    pack: security
+    description: Query the OSV vulnerability database by package and version.
+    transport: stdio
+    command: [npx, -y, osv-mcp]
+    env: []
+    docs: https://osv.dev
+
+  - id: trivy
+    pack: security
+    description: Scan images, filesystems, and IaC with Trivy.
+    transport: stdio
+    command: [npx, -y, trivy-mcp]
+    env: []
+    docs: https://github.com/aquasecurity/trivy
+
+  - id: scorecard
+    pack: security
+    description: Run OpenSSF Scorecard against a GitHub repo.
+    transport: stdio
+    command: [npx, -y, scorecard-mcp]
+    env: [GITHUB_TOKEN]
+    docs: https://securityscorecards.dev
+
+  # ---------- Enterprise pack ---------------------------------------------
+
+  - id: github
+    pack: enterprise
+    description: Read/write GitHub repos, issues, PRs, Actions, security alerts.
+    transport: stdio
+    command: [docker, run, -i, --rm, "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
+    env: [GITHUB_PERSONAL_ACCESS_TOKEN]
+    docs: https://github.com/github/github-mcp-server
+
+  - id: ado
+    pack: enterprise
+    description: Read/write Azure DevOps work items, repos, pipelines, test plans.
+    transport: stdio
+    command: [npx, -y, "@azure-devops/mcp"]
+    env: [AZURE_DEVOPS_EXT_PAT, AZURE_DEVOPS_ORG]
+    docs: https://github.com/microsoft/azure-devops-mcp
+
+  - id: atlassian
+    pack: enterprise
+    description: Read/write Confluence pages and Jira issues.
+    transport: stdio
+    command: [npx, -y, "@atlassian/mcp"]
+    env: [ATLASSIAN_API_TOKEN, ATLASSIAN_SITE_URL, ATLASSIAN_USER_EMAIL]
+    docs: https://www.atlassian.com/blog/announcements/remote-mcp-server
+
+  - id: microsoft-learn
+    pack: enterprise
+    description: Search and fetch Microsoft Learn documentation.
+    transport: http
+    url: https://learn.microsoft.com/api/mcp
+    env: []
+    docs: https://learn.microsoft.com/en-us/training/support/mcp
+
+  - id: terraform
+    pack: enterprise
+    description: Search Terraform registry, fetch module/provider docs and policies.
+    transport: stdio
+    command: [npx, -y, "@hashicorp/terraform-mcp-server"]
+    env: []
+    docs: https://github.com/hashicorp/terraform-mcp-server
+
+  - id: foundry
+    pack: enterprise
+    description: Deploy and evaluate Microsoft Foundry agents and models.
+    transport: stdio
+    command: [npx, -y, "@microsoft/foundry-mcp"]
+    env: [AZURE_SUBSCRIPTION_ID]
+    docs: https://learn.microsoft.com/en-us/azure/ai-foundry/

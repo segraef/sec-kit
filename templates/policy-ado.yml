@@ -1,0 +1,51 @@
+# SecKit Azure DevOps policy
+#
+# Used by `seckit audit ado <org/project/repo>` (read-only check) and by
+# `seckit enforce ado <org/project/repo>` (write the missing settings, with
+# --apply). Each setting has a severity: required, recommended, info.
+
+repo:
+  branch_policies:
+    default_branch:
+      minimum_reviewers:                  { value: 2, severity: required }
+      reset_on_push:                      { value: true, severity: required }
+      require_vote_on_last_iteration:     { value: true, severity: recommended }
+      block_self_approval:                { value: true, severity: required }
+      require_linked_work_items:          { value: true, severity: recommended }
+      require_comment_resolution:         { value: true, severity: required }
+      build_validation:                   { value: required, severity: required }
+      automatic_reviewers:                { value: codeowners, severity: required }
+      allowed_merge_types:
+        squash:                           { value: true, severity: recommended }
+        rebase:                           { value: false, severity: recommended }
+        merge_commit:                     { value: false, severity: recommended }
+    force_push_allowed:                   { value: false, severity: required }
+    branch_deletion_allowed:              { value: false, severity: required }
+
+  files:
+    .azuredevops/pull_request_template.md: { value: present, severity: recommended }
+    SECURITY.md:                          { value: present, severity: required }
+    CODEOWNERS:                           { value: present, severity: required }
+
+project:
+  pipelines:
+    limit_job_authorization_scope_project: { value: true, severity: required }
+    limit_job_authorization_scope_repo:    { value: true, severity: recommended }
+    settable_variables_at_queue_time:      { value: false, severity: required }
+    fork_builds_require_approval:          { value: true, severity: required }
+    fork_builds_secrets:                   { value: false, severity: required }
+  service_connections:
+    require_approval_for_use:              { value: true, severity: required }
+    scoped_to_workload_identity:           { value: true, severity: recommended }
+  environments:
+    require_approvals:                     { value: true, severity: required }
+
+org:
+  policies:
+    limit_job_authorization_scope_org:    { value: true, severity: required }
+    pat_lifetime_max_days:                { value: 90, severity: recommended }
+    allow_oauth_authentication:           { value: false, severity: recommended }
+    entra_only_sign_in:                   { value: true, severity: required }
+  auditing:
+    auditing_enabled:                     { value: true, severity: required }
+    stream_to_storage:                    { value: enabled, severity: recommended }

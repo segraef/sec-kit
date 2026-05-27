@@ -1,0 +1,14 @@
+# Code ownership and required reviewers.
+#
+# Lines listed later win. The default owner catches anything not matched.
+# Replace @your-org/security with your real team handle before committing.
+
+# Default owner for everything in the repo.
+*       @your-org/security
+
+# Security-sensitive areas: pin to security.
+/.github/        @your-org/security
+/SECURITY.md     @your-org/security
+**/*.tf          @your-org/security
+**/Dockerfile*   @your-org/security
+**/.env*         @your-org/security
