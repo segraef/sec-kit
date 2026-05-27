@@ -1,0 +1,14 @@
+title = "SecKit gitleaks configuration"
+
+# Inherit the full upstream ruleset (Stripe, AWS, Azure, OpenAI, private keys,
+# generic high-entropy, ...) and layer a small allowlist on top.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths that legitimately hold non-secret placeholders"
+paths = [
+  '''.*\.example$''',
+  '''\.env\..*\.example$''',
+  '''package-lock\.json$''',
+]

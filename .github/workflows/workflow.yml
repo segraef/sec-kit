@@ -20,6 +20,9 @@ jobs:
         uses: actions/checkout@v2
       - name: Hello
         shell: pwsh
+        env:
+          INPUT_NAME: ${{ github.event.inputs.name }}
+          INPUT_HOME: ${{ github.event.inputs.home }}
         run: |
-          echo "Hello ${{ github.event.inputs.name }}!"
-          echo "- in ${{ github.event.inputs.home }}!"
+          echo "Hello $env:INPUT_NAME!"
+          echo "- in $env:INPUT_HOME!"

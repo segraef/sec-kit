@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/*.p12)",
+      "Read(./**/*.pfx)",
+      "Read(./**/id_rsa*)",
+      "Read(./**/id_ed25519*)",
+      "Read(./**/.npmrc)",
+      "Read(./**/.netrc)",
+      "Read(./**/.pgpass)",
+      "Read(./**/credentials*)",
+      "Read(./**/service-account*.json)",
+      "Read(./**/*.tfvars)",
+      "Read(./**/*.tfstate)"
+    ]
+  }
+}
