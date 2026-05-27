@@ -10,38 +10,17 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
 </p>
 
-## Quick start
-
-Clone, then run it - `seckit install` sets up the scanners for you.
-
-**macOS / Linux**
+## Run it
 
 ```bash
 git clone https://github.com/segraef/sec-kit.git && cd sec-kit
-bash seckit.sh install   # installs scanners via Homebrew + npm
-bash seckit.sh           # interactive menu
+bash seckit.sh              # macOS / Linux
+pwsh ./seckit.ps1           # Windows
 ```
 
-**Windows (PowerShell)**
+That opens a menu. Pick **2) install** the first time — SecKit installs the
+scanners for you. Then **3) scan** a folder, or **4) harden** a repo against
+Claude/Copilot.
 
-```powershell
-git clone https://github.com/segraef/sec-kit.git; cd sec-kit
-pwsh ./seckit.ps1 install   # installs scanners via scoop + pipx + npm
-pwsh ./seckit.ps1           # interactive menu
-```
+More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE)
 
-Optional: `ln -s "$PWD/seckit.sh" /usr/local/bin/seckit` so you can just type `seckit`.
-
-## Commands
-
-```
-seckit              interactive menu (no arguments)
-seckit doctor       check the scanners are installed
-seckit scan [DIR]   scan repos for vuln deps, code/IaC flaws, malware, secrets
-seckit harden [DIR] add Claude + Copilot guardrails (--global for machine-wide)
-seckit reminders    show all reminders
-seckit startup      banner + rotating reminder + scanner health (for your shell rc)
-```
-
-Full documentation in [`docs/`](docs/). Bash and PowerShell are equivalent
-(`harden` is Bash-only for now). Licensed under [`LICENSE`](LICENSE).
