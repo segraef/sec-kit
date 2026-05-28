@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/seckit-banner.svg" alt="SecKit" width="620">
+  <img src="docs/media/seckit-banner-pixel.png" alt="SecKit" width="620">
 </p>
 
 <p align="center">Your portable security pre-flight kit. Run it before you work in any repo.</p>
