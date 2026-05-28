@@ -18,25 +18,17 @@ bash seckit.sh              # macOS / Linux
 pwsh ./seckit.ps1           # Windows
 ```
 
-That opens a menu. Pick **2) install** the first time. SecKit installs the
-scanners for you. Then **3) scan** a folder, or **4) harden** a repo against
-Claude/Copilot.
-
-Six verbs cover the loop:
-
-- **scan** finds vulnerable deps, code/IaC flaws, malware and secrets locally.
-- **harden** drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot,
-  CodeQL and PR templates into a repo so the next commit is clean.
-- **agent** installs the SecKit prompt as a Claude subagent, Copilot chat
-  mode, Cursor rule or `AGENTS.md` section, so any AI assistant can run the
-  same playbook without the shell scripts.
-- **mcp** wires the official MCP servers (Semgrep, Snyk, OSV, Trivy,
-  Scorecard, plus GitHub / ADO / Atlassian / Microsoft Learn / Terraform /
-  Foundry) into Claude, Copilot or Cursor.
-- **audit** is the read-only posture check against GitHub or Azure DevOps.
-  Safe to run in any customer environment.
-- **enforce** writes the missing settings flagged by `audit`. Dry-run by
-  default; pass `--apply` / `-Apply` to actually write.
+| Action        | What it does                                                                                                                                                   |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **doctor**    | Reports which scanners and clients (jq, yq, gh, az, gitleaks, semgrep, checkov, osv-scanner, trufflehog, pre-commit) are installed and which are missing.      |
+| **install**   | Installs every missing scanner and client via brew/npm/pipx/scoop. Run this once on a fresh machine.                                                           |
+| **scan**      | Sweeps a folder of repos for vulnerable dependencies, code/IaC flaws, malware and secrets. Pick all scanners or a subset (osv, gitleaks, trufflehog, semgrep, checkov, socket). |
+| **harden**    | Drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot, CodeQL and PR templates into a repo so the next commit is clean.                              |
+| **agent**     | Installs the SecKit prompt as a Claude subagent, Copilot chat mode, Cursor rule or `AGENTS.md` section so any AI assistant runs the same playbook.             |
+| **mcp**       | Wires the official MCP servers (Semgrep, Snyk, OSV, Trivy, Scorecard, GitHub, ADO, Atlassian, Microsoft Learn, Terraform, Foundry) into Claude/Copilot/Cursor. |
+| **audit**     | Read-only posture check against a GitHub org/repo or Azure DevOps project/repo. Safe to run anywhere because every call is a `GET`.                            |
+| **enforce**   | Writes the missing settings flagged by `audit`. Dry-run by default; pass `--apply` / `-Apply` to actually write.                                               |
+| **reminders** | Prints every security reminder in the kit. Handy as a checklist.                                                                                               |
 
 More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE)
 
