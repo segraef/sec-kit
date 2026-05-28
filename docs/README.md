@@ -125,8 +125,8 @@ seckit audit ado contoso/Platform/web-api      # ADO repo
 The report has the same shape as `seckit scan`: a summary line, a table of
 findings tagged `required` or `recommended`, and an "AI agent prompt" section
 that pastes straight into Claude or Copilot for a remediation plan. Exit code
-is non-zero when any `required` setting fails. Safe to run in customer
-environments because every call is a `GET`.
+is non-zero when any `required` setting fails. Safe to run anywhere because
+every call is a `GET`.
 
 ## Enforce missing settings
 
