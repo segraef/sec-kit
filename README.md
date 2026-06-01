@@ -31,5 +31,14 @@ pwsh ./seckit.ps1           # Windows
 | **enforce**   | Writes the missing settings flagged by `audit`. Dry-run by default; pass `--apply` / `-Apply` to actually write.                                               |
 | **reminders** | Prints every security reminder in the kit. Handy as a checklist.                                                                                               |
 
+## Run it in CI
+
+Drop-in pipelines that run the same flow on every push: `seckit install` provisions the scanners, `seckit scan` sweeps the repo, and the markdown report is published as a build artifact. They clone SecKit at run time, so the only thing your repo needs is the one file.
+
+- **GitHub Actions:** [`.github/workflows/seckit-scan.yml`](.github/workflows/seckit-scan.yml)
+- **Azure Pipelines:** [`.pipelines/seckit-scan.yml`](.pipelines/seckit-scan.yml)
+
+Both are soft-fail by default (findings produce a warning plus the report artifact, not a red build); flip the gate step to `exit 1` / remove `continueOnError` to block merges on findings.
+
 More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE)
 

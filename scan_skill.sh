@@ -118,8 +118,8 @@ scan_target() {
     done < <(grep -rIl "${GREP_EXCL[@]}" -- '' "$path" 2>/dev/null) >> "$lt"
   fi
 
-  local score=0 nC=0 nH=0 nM=0 nL=0 has_script=0 sv c fl ln sn
-  while IFS='|' read -r sv c fl ln sn; do
+  local score=0 nC=0 nH=0 nM=0 nL=0 has_script=0 sv fl
+  while IFS='|' read -r sv _ fl _ _; do
     [[ -z "$sv" ]] && continue
     score=$(( score + $(weight "$sv") ))
     case "$sv" in CRIT) nC=$((nC+1)) ;; HIGH) nH=$((nH+1)) ;; MED) nM=$((nM+1)) ;; LOW) nL=$((nL+1)) ;; esac
@@ -185,15 +185,25 @@ else
   echo "${BOLD}Discovering skills + MCP configs under:${RST}"
   for d in "${ROOTS[@]}"; do echo "  ${DIM}$(shorten "$d")${RST}"; done
 
+  # Prune noise: VCS/deps plus client housekeeping (backups, caches, saved
+  # transcripts, logs) that are not installed skills or live MCP configs.
+  PRUNE=(-name node_modules -o -name .git -o -name backups -o -name cache \
+         -o -name .cache -o -name projects -o -name statsig -o -name todos \
+         -o -name shell-snapshots -o -name history -o -name logs -o -name ide -o -name tmp)
+  DISC_EXCL=(--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=backups \
+             --exclude-dir=cache --exclude-dir=.cache --exclude-dir=projects \
+             --exclude-dir=statsig --exclude-dir=todos --exclude-dir=shell-snapshots \
+             --exclude-dir=history --exclude-dir=logs --exclude-dir=ide --exclude-dir=tmp)
+
   # Skill dirs = any directory containing a SKILL.md.
   TARGETS_TMP="$(mktemp 2>/dev/null || mktemp -t seckit-tg)"
-  find "${ROOTS[@]}" -type d \( -name node_modules -o -name .git \) -prune -o \
+  find "${ROOTS[@]}" -type d \( "${PRUNE[@]}" \) -prune -o \
     -type f -iname 'SKILL.md' -print 2>/dev/null \
     | while IFS= read -r m; do dirname "$m"; done | sort -u >> "$TARGETS_TMP"
   # MCP manifests = mcp.json / .mcp.json, plus any JSON declaring mcpServers.
-  find "${ROOTS[@]}" -type d \( -name node_modules -o -name .git \) -prune -o \
+  find "${ROOTS[@]}" -type d \( "${PRUNE[@]}" \) -prune -o \
     -type f \( -iname 'mcp.json' -o -iname '.mcp.json' \) -print 2>/dev/null >> "$TARGETS_TMP"
-  grep -rIls "${GREP_EXCL[@]}" '"mcpServers"' "${ROOTS[@]}" 2>/dev/null >> "$TARGETS_TMP"
+  grep -rIls "${DISC_EXCL[@]}" --include='*.json' '"mcpServers"' "${ROOTS[@]}" 2>/dev/null >> "$TARGETS_TMP"
 
   # Dedupe and scan each.
   n=0

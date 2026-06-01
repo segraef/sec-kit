@@ -27,7 +27,7 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: Lint shell scripts
-        run: shellcheck -S warning banner.sh seckit.sh scan_repos.sh
+        run: shellcheck -S warning banner.sh seckit.sh scan_repos.sh scan_skill.sh
 
   psscriptanalyzer:
     name: PSScriptAnalyzer

@@ -279,10 +279,11 @@ cmd_menu() {
         esac
         ;;
       s|skill|scan-skill)
-        printf 'Skill path, .zip or git URL (b to back): '; read -r tgt
-        if [[ -z "$tgt" || "$tgt" == b || "$tgt" == back ]]; then echo; continue; fi
-        tgt="${tgt/#\~/$HOME}"
-        bash "$HERE/scan_skill.sh" "$tgt"
+        printf 'Skill path / .zip / git URL, or %sEnter to scan all discovered%s (b to back): ' "$GRN" "$RST"
+        read -r tgt
+        if [[ "$tgt" == b || "$tgt" == back ]]; then echo; continue; fi
+        if [[ -z "$tgt" ]]; then bash "$HERE/scan_skill.sh"
+        else tgt="${tgt/#\~/$HOME}"; bash "$HERE/scan_skill.sh" "$tgt"; fi
         ;;
       4|harden)     cmd_harden ;;
       5|agent)      cmd_agent install ;;
