@@ -67,8 +67,11 @@ if (Have gitleaks) {
 }
 
 # ---------- Find repos (a dir holding .git or package.json) -----------------
+# Skip dependency and build-output trees - they are not repos and only
+# produce noise (vendored secrets, generated bundles, duplicate git history).
+$skipDirs = 'node_modules|\.next|dist|build|out|coverage|\.turbo|\.svelte-kit|\.nuxt|\.output|vendor|\.venv|venv|__pycache__'
 $markers = Get-ChildItem -Path $Root -Recurse -Force -Include 'package.json', '.git' -ErrorAction SilentlyContinue |
-  Where-Object { $_.FullName -notmatch '[\\/]node_modules[\\/]' }
+  Where-Object { $_.FullName -notmatch "[\\/]($skipDirs)[\\/]" }
 $repos = $markers | ForEach-Object { Split-Path $_.FullName -Parent } | Sort-Object -Unique
 
 if (-not $repos) { Write-Host "No repositories found under $Root"; exit 0 }
@@ -183,6 +186,27 @@ function Test-IsCleanWarning {
   return $false
 }
 
+# osv prints "(1 Critical, 16 High, 11 Medium, 1 Low, 0 Unknown)" - lift it for
+# the summary so the report leads with severity, not just a raw count.
+function Get-OsvSeverity {
+  param([string]$Log)
+  if (-not (Test-Path $Log)) { return '' }
+  $text = Get-Content $Log -Raw -ErrorAction SilentlyContinue
+  if (-not $text) { return '' }
+  $m = [regex]::Match($text, '\(([0-9]+ Critical, [0-9]+ High, [0-9]+ Medium, [0-9]+ Low[^)]*)\)')
+  if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+}
+
+# One cell of the summary table: finding count for (repo, scanner), or '-' when
+# that scanner did not run against that repo.
+function Get-Cell {
+  param([string]$Repo, [string]$Key)
+  $row = $Results | Where-Object { $_.Repo -eq $Repo -and $_.Scanner -eq $Key } | Select-Object -First 1
+  if (-not $row) { return '-' }
+  if ($row.ExitCode -eq 0 -or (Test-IsCleanWarning -Key $Key -Log $row.Log)) { return '0' }
+  return (Get-FindingCount -Key $Key -Log $row.Log)
+}
+
 function Get-AgentPrompt {
   $sb = [System.Text.StringBuilder]::new()
   [void]$sb.AppendLine('You are a security engineer. SecKit scanned this repository and reported the')
@@ -212,11 +236,14 @@ function Get-AgentPrompt {
 }
 
 # Markdown report on disk.
+$ranKeys = @($Results | Select-Object -ExpandProperty Scanner -Unique)
 $md = [System.Text.StringBuilder]::new()
 [void]$md.AppendLine('# SecKit scan report')
 [void]$md.AppendLine()
-[void]$md.AppendLine("_$([datetime]::Now.ToString('u'))_  ")
-[void]$md.AppendLine("**Root:** ``$Root``")
+[void]$md.AppendLine("- **Date:** $([datetime]::Now.ToString('u'))")
+[void]$md.AppendLine("- **Root:** ``$Root``")
+[void]$md.AppendLine("- **Repos scanned:** $($repos.Count)")
+[void]$md.AppendLine("- **Repos with findings:** $flagged")
 [void]$md.AppendLine()
 [void]$md.AppendLine('## Scanners')
 [void]$md.AppendLine()
@@ -231,6 +258,31 @@ if ($ScannersSkipped.Count) {
   foreach ($s in $ScannersSkipped) { [void]$md.AppendLine("- $s") }
 }
 [void]$md.AppendLine()
+
+# Summary table: one row per repo, one column per scanner that ran.
+if ($ranKeys.Count -and $repos.Count) {
+  [void]$md.AppendLine('## Summary')
+  [void]$md.AppendLine()
+  [void]$md.AppendLine('| Repo | ' + (($ranKeys) -join ' | ') + ' |')
+  [void]$md.AppendLine('|---|' + (($ranKeys | ForEach-Object { '---' }) -join '|') + '|')
+  foreach ($r in $repos) {
+    $rel = if ($r -eq $Root) { '.' } else { $r.Substring($Root.Length).TrimStart('\','/') }
+    $cells = $ranKeys | ForEach-Object { Get-Cell -Repo $r -Key $_ }
+    [void]$md.AppendLine("| ``$rel`` | " + ($cells -join ' | ') + ' |')
+  }
+  [void]$md.AppendLine()
+  [void]$md.AppendLine('_`-` = scanner did not apply to that repo, `0` = clean, counts are approximate._')
+  [void]$md.AppendLine()
+  foreach ($row in ($Results | Where-Object { $_.Scanner -eq 'osv' })) {
+    $sev = Get-OsvSeverity -Log $row.Log
+    if ($sev) {
+      $rel = if ($row.Repo -eq $Root) { '.' } else { $row.Repo.Substring($Root.Length).TrimStart('\','/') }
+      [void]$md.AppendLine("**osv severity (``$rel``):** $sev")
+      [void]$md.AppendLine()
+    }
+  }
+}
+
 [void]$md.AppendLine('## Findings')
 $any = $false
 foreach ($r in $repos) {
@@ -240,9 +292,12 @@ foreach ($r in $repos) {
     [void]$md.AppendLine(); [void]$md.AppendLine("### ``$r``")
     foreach ($row in $rows) {
       $n = Get-FindingCount -Key $row.Scanner -Log $row.Log
-      [void]$md.AppendLine(); [void]$md.AppendLine("#### $($row.Scanner) - $n finding(s)"); [void]$md.AppendLine(); [void]$md.AppendLine('```')
+      [void]$md.AppendLine()
+      [void]$md.AppendLine('<details>')
+      [void]$md.AppendLine("<summary><strong>$($row.Scanner)</strong> - $n finding(s)</summary>")
+      [void]$md.AppendLine(); [void]$md.AppendLine('```')
       if (Test-Path $row.Log) { Get-Content $row.Log -TotalCount 200 | ForEach-Object { [void]$md.AppendLine($_) } }
-      [void]$md.AppendLine('```')
+      [void]$md.AppendLine('```'); [void]$md.AppendLine(); [void]$md.AppendLine('</details>')
     }
   }
 }
@@ -277,20 +332,31 @@ foreach ($r in $repos) {
     Write-Host "  $r"
     foreach ($row in $rows) {
       $n = Get-FindingCount -Key $row.Scanner -Log $row.Log
-      Write-Host ("    {0,-10} {1} finding(s)" -f $row.Scanner, $n) -ForegroundColor Yellow
+      $extra = ''
+      if ($row.Scanner -eq 'osv') {
+        $sev = Get-OsvSeverity -Log $row.Log
+        if ($sev) { $extra = "  ($sev)" }
+      }
+      Write-Host ("    {0,-10} {1} finding(s){2}" -f $row.Scanner, $n, $extra) -ForegroundColor Yellow
     }
   }
 }
 if (-not $any) { Write-Host '  (clean)' -ForegroundColor Green }
 Write-Host ''
-Write-Host "Full report: $ReportFile" -ForegroundColor White
-
+Write-Host '========================================' -ForegroundColor White
+Write-Host '  Report saved' -ForegroundColor White
+Write-Host '========================================' -ForegroundColor White
+Write-Host "  $ReportFile" -ForegroundColor Green
+Write-Host ''
+if ($IsWindows) {
+  Write-Host "  open it:   Invoke-Item `"$ReportFile`"" -ForegroundColor DarkGray
+} else {
+  Write-Host "  open it:   open `"$ReportFile`"" -ForegroundColor DarkGray
+}
+Write-Host "  or:        Get-Content `"$ReportFile`"" -ForegroundColor DarkGray
 if ($flagged -gt 0) {
   Write-Host ''
-  Write-Host 'Copy/paste prompt for your AI agent' -ForegroundColor White
-  Write-Host '--- begin prompt -----------------------------------------' -ForegroundColor DarkGray
-  Write-Host (Get-AgentPrompt)
-  Write-Host '--- end prompt -------------------------------------------' -ForegroundColor DarkGray
+  Write-Host '  The report ends with a copy/paste prompt to hand the findings to an AI agent.' -ForegroundColor DarkGray
 }
 
 Remove-Item -Recurse -Force $LogDir -ErrorAction SilentlyContinue

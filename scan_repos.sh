@@ -115,7 +115,10 @@ repos=()
 while IFS= read -r d; do
   [[ -n "$d" ]] && repos+=("$d")
 done < <(find "$ROOT" \
-  -type d -name node_modules -prune -o \
+  -type d \( -name node_modules -o -name .next -o -name dist -o -name build \
+             -o -name out -o -name coverage -o -name .turbo -o -name .svelte-kit \
+             -o -name .nuxt -o -name .output -o -name vendor -o -name .venv \
+             -o -name venv -o -name __pycache__ \) -prune -o \
   -type d -name .git -prune -print -o \
   -type f -name package.json -print 2>/dev/null \
   | while IFS= read -r marker; do dirname "$marker"; done \
@@ -265,6 +268,28 @@ seckit_count() {
   printf '%s' "$n"
 }
 
+# osv prints "(1 Critical, 16 High, 11 Medium, 1 Low, 0 Unknown)" - lift the
+# severity breakdown for the summary so the report leads with the worst news.
+seckit_osv_severity() {
+  local log="$1"
+  [[ -f "$log" ]] || return
+  grep -oE '\([0-9]+ Critical, [0-9]+ High, [0-9]+ Medium, [0-9]+ Low[^)]*\)' "$log" \
+    | head -1 | tr -d '()'
+}
+
+# One cell of the summary table: finding count for (repo, scanner), or '-' when
+# that scanner did not run against that repo.
+seckit_cell() {
+  local repo="$1" key="$2" row k r rc lg
+  for row in "${RESULTS[@]}"; do
+    IFS='|' read -r k r rc lg <<< "$row"
+    [[ "$r" == "$repo" && "$k" == "$key" ]] || continue
+    if (( rc == 0 )) || seckit_is_clean_warning "$k" "$lg"; then printf '0'; else seckit_count "$k" "$lg"; fi
+    return
+  done
+  printf -- '-'
+}
+
 # A non-zero exit code does not always mean "found something". Some scanners
 # also fail when there is nothing to scan (e.g. osv: "No package sources").
 # The shared check is defined earlier so the inline scan loop and the report
@@ -304,8 +329,10 @@ PROMPT_HEAD
 # Write the full markdown report to ~/.seckit/reports.
 {
   printf '# SecKit scan report\n\n'
-  printf '_%s_  \n' "$(date)"
-  printf '**Root:** `%s`\n\n' "$ROOT"
+  printf -- '- **Date:** %s\n' "$(date)"
+  printf -- '- **Root:** `%s`\n' "$ROOT"
+  printf -- '- **Repos scanned:** %s\n' "${#repos[@]}"
+  printf -- '- **Repos with findings:** %s\n\n' "$flagged"
 
   printf '## Scanners\n\n'
   if (( ${#SCANNERS_RUN[@]} )); then
@@ -317,8 +344,29 @@ PROMPT_HEAD
   fi
   if (( ${#SCANNERS_SKIPPED[@]} )); then
     printf '**Skipped:**\n\n'
-    for s in "${SCANNERS_SKIPPED[@]}"; do printf '- %s\n' "$s"; done
+    for s in "${SCANNERS_SKIPPED[@]}"; do printf -- '- %s\n' "$s"; done
     printf '\n'
+  fi
+
+  # Summary table: one row per repo, one column per scanner that ran.
+  if (( ${#SCANNERS_RUN[@]} && ${#repos[@]} )); then
+    printf '## Summary\n\n'
+    printf '| Repo |'; for s in "${SCANNERS_RUN[@]}"; do printf ' %s |' "$s"; done; printf '\n'
+    printf '|---|'; for s in "${SCANNERS_RUN[@]}"; do printf -- '---|'; done; printf '\n'
+    for repo in "${repos[@]}"; do
+      rel="${repo#"$ROOT"/}"; [[ "$rel" == "$repo" ]] && rel='.'
+      printf '| `%s` |' "$rel"
+      for s in "${SCANNERS_RUN[@]}"; do printf ' %s |' "$(seckit_cell "$repo" "$s")"; done
+      printf '\n'
+    done
+    printf '\n_`-` = scanner did not apply to that repo, `0` = clean, counts are approximate._\n\n'
+    for row in "${RESULTS[@]}"; do
+      IFS='|' read -r k r rc lg <<< "$row"
+      [[ "$k" == osv ]] || continue
+      sev="$(seckit_osv_severity "$lg")"
+      rel="${r#"$ROOT"/}"; [[ "$rel" == "$r" ]] && rel='.'
+      [[ -n "$sev" ]] && printf '**osv severity (`%s`):** %s\n\n' "$rel" "$sev"
+    done
   fi
 
   printf '## Findings\n'
@@ -336,9 +384,9 @@ PROMPT_HEAD
           has=1; any=1
         fi
         n="$(seckit_count "$k" "$lg")"
-        printf '\n#### %s - %s finding(s)\n\n```\n' "$k" "$n"
+        printf '\n<details>\n<summary><strong>%s</strong> - %s finding(s)</summary>\n\n```\n' "$k" "$n"
         [[ -f "$lg" ]] && head -200 "$lg"
-        printf '```\n'
+        printf '```\n\n</details>\n'
       done
     fi
   done
@@ -384,20 +432,28 @@ for repo in "${repos[@]}"; do
         has=1; any=1
       fi
       n="$(seckit_count "$k" "$lg")"
-      printf '    %s%-10s%s %s finding(s)\n' "$YEL" "$k" "$RST" "$n"
+      extra=""
+      if [[ "$k" == osv ]]; then
+        sev="$(seckit_osv_severity "$lg")"
+        [[ -n "$sev" ]] && extra="  ${DIM}(${sev})${RST}"
+      fi
+      printf '    %s%-10s%s %s finding(s)%s\n' "$YEL" "$k" "$RST" "$n" "$extra"
     done
   fi
 done
 (( any == 0 )) && echo "  ${GRN}(clean)${RST}"
 echo
-echo "${BOLD}Full report:${RST} $REPORT_FILE"
+echo "${BOLD}========================================${RST}"
+echo "${BOLD}  Report saved${RST}"
+echo "${BOLD}========================================${RST}"
+echo "  ${GRN}${REPORT_FILE}${RST}"
+echo
+echo "  ${DIM}open it:${RST}   open \"$REPORT_FILE\"        ${DIM}# macOS${RST}"
+echo "  ${DIM}or:${RST}        cat \"$REPORT_FILE\""
 
 if (( flagged > 0 )); then
   echo
-  echo "${BOLD}Copy/paste prompt for your AI agent${RST}"
-  echo "${DIM}--- begin prompt -----------------------------------------${RST}"
-  emit_agent_prompt
-  echo "${DIM}--- end prompt -------------------------------------------${RST}"
+  echo "  ${DIM}The report ends with a copy/paste prompt to hand the findings to an AI agent.${RST}"
 fi
 
 (( flagged == 0 )) || exit 1

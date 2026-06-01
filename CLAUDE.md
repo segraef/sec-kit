@@ -28,4 +28,15 @@ These rules apply to AI coding agents working in this repository
 - Never commit files matching the secret patterns in `.gitignore`.
 - If you find a secret already committed, stop and tell the human.
 
+## Before you commit (definition of green)
+- Run `bash check.sh` and make it print `RESULT: green` before committing or
+  reporting work as done. It runs the same gates CI enforces: bash syntax,
+  `shellcheck` (banner.sh, seckit.sh, scan_repos.sh, scan_skill.sh, check.sh),
+  `PSScriptAnalyzer` (all `*.ps1`, recursive), and YAML parse of the CI files.
+- A red `check.sh` means a red PR. Fix it; do not hand work back while it fails.
+- Keep the shellcheck file list in `check.sh` and `.github/workflows/ci.yml` in
+  sync when you add a new shell script. New `*.ps1` are covered automatically.
+- Pure-ASCII PowerShell: express non-ASCII (e.g. zero-width chars) as `\uXXXX`
+  regex escapes, never literal characters, or PSScriptAnalyzer demands a BOM.
+
 <!-- Managed by SecKit (`seckit harden`). Edit to taste; re-running won't clobber it. -->
