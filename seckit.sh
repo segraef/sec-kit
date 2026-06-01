@@ -6,6 +6,7 @@
 #   seckit install      install any missing scanners + clients (brew/npm/pipx)
 #   seckit doctor       check that scanners + clients are installed
 #   seckit scan [DIR]   sweep local repos for vulns, malicious packages, secrets
+#   seckit scan-skill <t> vet an AI skill / MCP server before you install it
 #   seckit harden [DIR] drop AI-agent guardrails + PR/CODEOWNERS into a repo
 #   seckit agent <sub>  install the SecKit agent prompt for Claude/Copilot/Cursor
 #   seckit mcp <sub>    list/install/check MCP servers (security + enterprise)
@@ -229,7 +230,7 @@ print_status() {
   fi
 }
 
-cmd_help() { sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+cmd_help() { sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # Interactive menu: shown when seckit is run with no arguments on a terminal.
 cmd_menu() {
@@ -242,6 +243,7 @@ cmd_menu() {
     echo "  ${GRN}1${RST}) doctor      ${DIM}check your tools are installed${RST}"
     echo "  ${GRN}2${RST}) install     ${DIM}install any missing scanners + clients${RST}"
     echo "  ${GRN}3${RST}) scan        ${DIM}sweep local repos for vulns, malware, secrets${RST}"
+    echo "  ${GRN}s${RST}) scan-skill  ${DIM}vet an AI skill / MCP server before installing${RST}"
     echo "  ${GRN}4${RST}) harden      ${DIM}AI guardrails + PR/CODEOWNERS + dependabot${RST}"
     echo "  ${GRN}5${RST}) agent       ${DIM}install the SecKit agent for Claude/Copilot/Cursor${RST}"
     echo "  ${GRN}6${RST}) mcp         ${DIM}install MCP servers (security + enterprise packs)${RST}"
@@ -275,6 +277,12 @@ cmd_menu() {
             else echo "Nothing selected."; fi
             ;;
         esac
+        ;;
+      s|skill|scan-skill)
+        printf 'Skill path, .zip or git URL (b to back): '; read -r tgt
+        if [[ -z "$tgt" || "$tgt" == b || "$tgt" == back ]]; then echo; continue; fi
+        tgt="${tgt/#\~/$HOME}"
+        bash "$HERE/scan_skill.sh" "$tgt"
         ;;
       4|harden)     cmd_harden ;;
       5|agent)      cmd_agent install ;;
@@ -625,6 +633,7 @@ case "$cmd" in
   doctor|check)     cmd_doctor ;;
   install|setup)    cmd_install "$@" ;;
   scan)             exec bash "$HERE/scan_repos.sh" "$@" ;;
+  scan-skill|skill) exec bash "$HERE/scan_skill.sh" "$@" ;;
   harden|guard|init) cmd_harden "$@" ;;
   agent)            cmd_agent "$@" ;;
   mcp)              exec bash "$HERE/mcp.sh" "$@" ;;
