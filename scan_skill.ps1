@@ -108,8 +108,15 @@ function Invoke-SkillScan {
   elseif ($score -ge 21) { $band='MEDIUM';   $verdict='REVIEW BEFORE INSTALL' }
   else                   { $band='LOW';      $verdict='LIKELY SAFE' }
 
+  # Classify where the target lives. Marketplace clones are on disk but not
+  # installed/enabled - real, but not an active risk - so we surface them and
+  # leave them out of the pass/fail gate. (Path heuristic; offline + simple.)
+  $context = 'local'
+  if     ($Path -match '[\\/]plugins[\\/]marketplaces[\\/]') { $context = 'catalog' }
+  elseif ($Path -match '[\\/]plugins[\\/]cache[\\/]')        { $context = 'installed' }
+
   $summaries.Add([pscustomobject]@{
-    Label=$Label; Score=$score; Band=$band; Verdict=$verdict
+    Label=$Label; Score=$score; Band=$band; Verdict=$verdict; Context=$context
     C=(@($local | Where-Object Sev -eq 'CRIT')).Count
     H=(@($local | Where-Object Sev -eq 'HIGH')).Count
     M=(@($local | Where-Object Sev -eq 'MED')).Count
@@ -190,9 +197,14 @@ try {
   }
 
   # ---------- Overall verdict ----------------------------------------------
-  $worst = ($summaries | Measure-Object -Property Score -Maximum).Maximum
+  # The gate (flagged + exit code) only counts installed/local targets.
+  # Marketplace-catalog entries are on disk but not enabled, so they are
+  # reported for awareness but never fail the run.
+  $gated = @($summaries | Where-Object { $_.Context -ne 'catalog' })
+  $catalog = (@($summaries | Where-Object { $_.Context -eq 'catalog' })).Count
+  $worst = if ($gated) { ($gated | Measure-Object -Property Score -Maximum).Maximum } else { 0 }
   if (-not $worst) { $worst = 0 }
-  $flagged = (@($summaries | Where-Object { $_.Score -ge 51 })).Count
+  $flagged = (@($gated | Where-Object { $_.Score -ge 51 })).Count
   if     ($worst -ge 81) { $oband='CRITICAL'; $ocol='Red' }
   elseif ($worst -ge 51) { $oband='HIGH';     $ocol='Red' }
   elseif ($worst -ge 21) { $oband='MEDIUM';   $ocol='Yellow' }
@@ -203,12 +215,20 @@ try {
   Write-Host '========================================' -ForegroundColor White
   Write-Host '  Skill scan' -ForegroundColor White
   Write-Host '========================================' -ForegroundColor White
-  Write-Host "  Targets:  $($summaries.Count)    Worst: $worst/100 ($oband)    Flagged (HIGH+): $flagged" -ForegroundColor $ocol
+  Write-Host "  Targets:  $($summaries.Count)    Worst installed: $worst/100 ($oband)    Flagged (HIGH+): $flagged" -ForegroundColor $ocol
+  if ($catalog -gt 0) {
+    $word = if ($catalog -eq 1) { 'entry' } else { 'entries' }
+    Write-Host "  $catalog marketplace-catalog $word on disk but not installed - shown for awareness, excluded from the gate." -ForegroundColor DarkGray
+  }
   Write-Host ''
   Write-Host ('  {0,-5} {1,-9} {2}' -f 'SCORE', 'BAND', 'TARGET') -ForegroundColor White
   foreach ($s in ($summaries | Sort-Object Score -Descending)) {
-    $c = switch ($s.Band) { 'CRITICAL' { 'Red' } 'HIGH' { 'Red' } 'MEDIUM' { 'Yellow' } default { 'Green' } }
-    Write-Host ('  {0,-5} {1,-9} {2}' -f $s.Score, $s.Band, $s.Label) -ForegroundColor $c
+    if ($s.Context -eq 'catalog') {
+      Write-Host ('  {0,-5} {1,-9} {2}  (catalog, not installed)' -f $s.Score, $s.Band, $s.Label) -ForegroundColor DarkGray
+    } else {
+      $c = switch ($s.Band) { 'CRITICAL' { 'Red' } 'HIGH' { 'Red' } 'MEDIUM' { 'Yellow' } default { 'Green' } }
+      Write-Host ('  {0,-5} {1,-9} {2}' -f $s.Score, $s.Band, $s.Label) -ForegroundColor $c
+    }
   }
   Write-Host ''
 
@@ -235,12 +255,14 @@ try {
     [void]$md.AppendLine("- **Date:** $([datetime]::Now.ToString('u'))")
     [void]$md.AppendLine("- **Mode:** $mode")
     [void]$md.AppendLine("- **Targets scanned:** $($summaries.Count)")
-    [void]$md.AppendLine("- **Worst score:** $worst/100 ($oband)")
-    [void]$md.AppendLine("- **Flagged (HIGH+):** $flagged"); [void]$md.AppendLine()
+    [void]$md.AppendLine("- **Worst installed score:** $worst/100 ($oband)")
+    [void]$md.AppendLine("- **Flagged (HIGH+):** $flagged")
+    if ($catalog -gt 0) { [void]$md.AppendLine("- **Marketplace-catalog (not installed):** $catalog (excluded from the gate)") }
+    [void]$md.AppendLine()
     [void]$md.AppendLine('## Per-target summary'); [void]$md.AppendLine()
-    [void]$md.AppendLine('| Score | Band | Verdict | C | H | M | L | Target |'); [void]$md.AppendLine('|---|---|---|---|---|---|---|---|')
+    [void]$md.AppendLine('| Score | Band | Verdict | C | H | M | L | Context | Target |'); [void]$md.AppendLine('|---|---|---|---|---|---|---|---|---|')
     foreach ($s in ($summaries | Sort-Object Score -Descending)) {
-      [void]$md.AppendLine("| $($s.Score) | $($s.Band) | $($s.Verdict) | $($s.C) | $($s.H) | $($s.M) | $($s.L) | ``$($s.Label)`` |")
+      [void]$md.AppendLine("| $($s.Score) | $($s.Band) | $($s.Verdict) | $($s.C) | $($s.H) | $($s.M) | $($s.L) | $($s.Context) | ``$($s.Label)`` |")
     }
     [void]$md.AppendLine()
     if ($script:Findings.Count -eq 0) {

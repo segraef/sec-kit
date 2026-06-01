@@ -11,7 +11,7 @@
 # rarely break on script edits and need network/containers.
 #
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 2
 
 # Keep this list in sync with the shellcheck step in ci.yml.
 SH_FILES=(banner.sh seckit.sh scan_repos.sh scan_skill.sh check.sh)

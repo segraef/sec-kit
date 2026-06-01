@@ -135,8 +135,17 @@ scan_target() {
   else                        band="LOW";      verdict="LIKELY SAFE"
   fi
 
+  # Classify where the target lives. Marketplace clones are on disk but not
+  # installed/enabled - real, but not an active risk - so we surface them and
+  # leave them out of the pass/fail gate. (Path heuristic; offline + simple.)
+  local context="local"
+  case "$path" in
+    */plugins/marketplaces/*) context="catalog" ;;
+    */plugins/cache/*)        context="installed" ;;
+  esac
+
   while IFS= read -r l; do [[ -n "$l" ]] && printf '%s|%s\n' "$label" "$l"; done < "$lt" >> "$FIND_TMP"
-  printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$score" "$band" "$verdict" "$nC" "$nH" "$nM" "$nL" >> "$SUMMARY"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$score" "$band" "$verdict" "$nC" "$nH" "$nM" "$nL" "$context" >> "$SUMMARY"
   rm -f "$lt"
 }
 
@@ -223,12 +232,19 @@ else
 fi
 
 # ---------- Overall verdict -------------------------------------------------
-worst=0; flagged=0; tcount=0
-while IFS='|' read -r label score band verdict nC nH nM nL; do
+# The gate (flagged + exit code) only counts targets that are actually
+# installed/local. Marketplace-catalog entries are on disk but not enabled, so
+# they are reported for awareness but never fail the run.
+worst=0; flagged=0; tcount=0; catalog=0
+while IFS='|' read -r label score band verdict nC nH nM nL context; do
   [[ -z "$label" ]] && continue
   tcount=$((tcount+1))
-  (( score > worst )) && worst=$score
-  (( score >= 51 )) && flagged=$((flagged+1))
+  if [[ "$context" == catalog ]]; then
+    catalog=$((catalog+1))
+  else
+    (( score > worst )) && worst=$score
+    (( score >= 51 )) && flagged=$((flagged+1))
+  fi
 done < "$SUMMARY"
 
 if   (( worst >= 81 )); then oband="CRITICAL"; ocol="$RED"
@@ -242,15 +258,20 @@ echo
 echo "${BOLD}========================================${RST}"
 echo "${BOLD}  Skill scan${RST}"
 echo "${BOLD}========================================${RST}"
-echo "  Targets:  ${tcount}    Worst: ${ocol}${BOLD}${worst}/100${RST} (${ocol}${oband}${RST})    Flagged (HIGH+): ${flagged}"
+echo "  Targets:  ${tcount}    Worst installed: ${ocol}${BOLD}${worst}/100${RST} (${ocol}${oband}${RST})    Flagged (HIGH+): ${flagged}"
+(( catalog > 0 )) && echo "  ${DIM}${catalog} marketplace-catalog entr$( (( catalog == 1 )) && echo y || echo ies ) on disk but not installed - shown for awareness, excluded from the gate.${RST}"
 echo
 
 # Per-target table (sorted worst first).
 printf '  %s%-5s %-9s %s%s\n' "$BOLD" "SCORE" "BAND" "TARGET" "$RST"
-while IFS='|' read -r label score band verdict nC nH nM nL; do
+while IFS='|' read -r label score band verdict nC nH nM nL context; do
   [[ -z "$label" ]] && continue
-  case "$band" in CRITICAL|HIGH) c="$RED" ;; MEDIUM) c="$YEL" ;; *) c="$GRN" ;; esac
-  printf '  %s%-5s %-9s%s %s\n' "$c" "$score" "$band" "$RST" "$label"
+  if [[ "$context" == catalog ]]; then c="$DIM"; tag="  ${DIM}(catalog, not installed)${RST}"
+  else
+    case "$band" in CRITICAL|HIGH) c="$RED" ;; MEDIUM) c="$YEL" ;; *) c="$GRN" ;; esac
+    tag=""
+  fi
+  printf '  %s%-5s %-9s%s %s%s\n' "$c" "$score" "$band" "$RST" "$label" "$tag"
 done < <(sort -t'|' -k2,2nr "$SUMMARY")
 echo
 
@@ -285,14 +306,16 @@ if (( WRITE_REPORT )); then
     printf -- '- **Date:** %s\n' "$(date)"
     printf -- '- **Mode:** %s\n' "$MODE"
     printf -- '- **Targets scanned:** %s\n' "$tcount"
-    printf -- '- **Worst score:** %s/100 (%s)\n' "$worst" "$oband"
-    printf -- '- **Flagged (HIGH+):** %s\n\n' "$flagged"
+    printf -- '- **Worst installed score:** %s/100 (%s)\n' "$worst" "$oband"
+    printf -- '- **Flagged (HIGH+):** %s\n' "$flagged"
+    (( catalog > 0 )) && printf -- '- **Marketplace-catalog (not installed):** %s (excluded from the gate)\n' "$catalog"
+    printf '\n'
 
     printf '## Per-target summary\n\n'
-    printf '| Score | Band | Verdict | C | H | M | L | Target |\n|---|---|---|---|---|---|---|---|\n'
-    while IFS='|' read -r label score band verdict nC nH nM nL; do
+    printf '| Score | Band | Verdict | C | H | M | L | Context | Target |\n|---|---|---|---|---|---|---|---|---|\n'
+    while IFS='|' read -r label score band verdict nC nH nM nL context; do
       [[ -z "$label" ]] && continue
-      printf '| %s | %s | %s | %s | %s | %s | %s | `%s` |\n' "$score" "$band" "$verdict" "$nC" "$nH" "$nM" "$nL" "$label"
+      printf '| %s | %s | %s | %s | %s | %s | %s | %s | `%s` |\n' "$score" "$band" "$verdict" "$nC" "$nH" "$nM" "$nL" "$context" "$label"
     done < <(sort -t'|' -k2,2nr "$SUMMARY")
     printf '\n'
 
