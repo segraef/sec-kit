@@ -24,7 +24,7 @@ pwsh ./seckit.ps1           # Windows
 | **install**   | Installs every missing scanner and client via brew/npm/pipx/scoop. Run this once on a fresh machine.                                                           |
 | **scan**      | Sweeps a folder of repos for vulnerable dependencies, code/IaC flaws, malware and secrets. Pick all scanners or a subset (osv, gitleaks, trufflehog, semgrep, checkov, socket). |
 | **scan-skill** | Statically vets an AI agent skill or MCP server (directory, `.zip` or git URL) before you install it: prompt-injection, data exfiltration, credential theft, supply-chain RCE, obfuscation, over-broad agency and MCP tool poisoning. Never executes the target; prints a 0-100 risk verdict and a markdown report. |
-| **harden**    | Drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot, CodeQL and PR templates into a repo so the next commit is clean.                              |
+| **harden**    | Drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot, CodeQL and PR templates into a repo so the next commit is clean. On Node repos it also sets `ignore-scripts=true` in `.npmrc` to block install-time supply-chain worms (see below). |
 | **agent**     | Installs the SecKit prompt as a Claude subagent, Copilot chat mode, Cursor rule or `AGENTS.md` section so any AI assistant runs the same playbook.             |
 | **mcp**       | Wires the official MCP servers (Semgrep, Snyk, OSV, Trivy, Scorecard, GitHub, ADO, Atlassian, Microsoft Learn, Terraform, Foundry) into Claude/Copilot/Cursor. |
 | **audit**     | Read-only posture check against a GitHub org/repo or Azure DevOps project/repo. Safe to run anywhere because every call is a `GET`.                            |
@@ -40,5 +40,31 @@ Drop-in pipelines that run the same flow on every push: `seckit install` provisi
 
 Both are soft-fail by default (findings produce a warning plus the report artifact, not a red build); flip the gate step to `exit 1` / remove `continueOnError` to block merges on findings.
 
-More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE)
+## Blocking npm install-script worms
+
+Self-propagating npm worms (for example the May 2026 `redhat-cloud-services` worm that hit 90+ packages) run their payload from a package's `preinstall`/`install`/`postinstall` hook **during `npm install`, before any of your own code runs**. A scanner only helps if it runs before install, and only catches what it has catalogued; by the time a brand-new variant has an advisory, the hook has already executed and exfiltrated your npm/GitHub/cloud/SSH tokens.
+
+`seckit harden` closes the vector at the source on any repo with a `package.json`: it appends `ignore-scripts=true` to `.npmrc`, so no dependency lifecycle script executes on install. This holds even for a variant no scanner knows about yet.
+
+**The trade-off, handled.** A few legitimate deps build native code in those hooks (`esbuild`, `sharp`, `bcrypt`, ...), and your own root `postinstall`/`prepare` (husky, prisma) is skipped too. `harden` does not leave you to discover this the hard way: it scans `node_modules` and prints the exact deps in your repo that build via install scripts, and the generated `.npmrc` documents how to allowlist them rather than disabling the protection:
+
+```bash
+npx --yes @lavamoat/allow-scripts auto   # write a vetted allowlist into package.json
+npx --yes @lavamoat/allow-scripts        # run ONLY allowlisted scripts, after install
+# or, dependency-free, for a single vetted native dep:
+npm rebuild <pkg> --ignore-scripts=false
+```
+
+A hardened install flow then looks like `npm ci && npx --yes @lavamoat/allow-scripts && npm run prepare`.
+
+## Releases
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please), driven by [Conventional Commits](https://www.conventionalcommits.org/) on `main`:
+
+- Push a `feat:`/`fix:` commit to `main`. The [`release`](.github/workflows/release.yml) workflow opens (or updates) a **release PR** that bumps `version.txt` + `.release-please-manifest.json` and rewrites `CHANGELOG.md` from your commits.
+- Merge that PR. release-please tags the commit `vX.Y.Z` and publishes a GitHub Release.
+
+Pre-1.0, `feat:` bumps the minor and `fix:` bumps the patch (configured in [`release-please-config.json`](release-please-config.json)). `seckit version` prints the current version. One-time repo setting: **Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests"** must be enabled so the release PR can be opened with the default token.
+
+More: [`docs/`](docs/) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE)
 

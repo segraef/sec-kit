@@ -1,0 +1,34 @@
+# Automated releases for SecKit, driven by Conventional Commits.
+#
+# How it works (release-please):
+# - Every push to main is scanned for conventional commits (feat:, fix:, ...).
+# - release-please keeps an open "release PR" that bumps version.txt + the
+#   manifest and rewrites CHANGELOG.md from those commits.
+# - Merging that PR tags the commit (vX.Y.Z) and publishes a GitHub Release.
+#
+# Pre-1.0 bumping: feat -> minor, fix -> patch (see release-please-config.json).
+#
+# Repo setting required once: Settings > Actions > General >
+# "Allow GitHub Actions to create and approve pull requests" must be ON,
+# otherwise the release PR cannot be opened with the default GITHUB_TOKEN.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

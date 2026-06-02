@@ -14,6 +14,7 @@
 #   seckit enforce <p> <s> write the missing settings (dry-run by default)
 #   seckit reminders    print all security reminders
 #   seckit startup      animated banner + one rotating reminder + tool health
+#   seckit version      print the installed SecKit version
 #   seckit help         this help
 #
 # Run it before you start work in any repo. Reminders live in reminders.txt.
@@ -21,6 +22,9 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Single source of truth, maintained by release-please (see version.txt).
+SECKIT_VERSION="$(cat "$HERE/version.txt" 2>/dev/null || echo dev)"
 
 # Optional animated banner (defines banner(); does not auto-play here because
 # this script runs non-interactively).
@@ -230,7 +234,7 @@ print_status() {
   fi
 }
 
-cmd_help() { sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+cmd_help() { sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # Interactive menu: shown when seckit is run with no arguments on a terminal.
 cmd_menu() {
@@ -378,6 +382,39 @@ _h_block() {  # append SecKit block to dest if marker not already present
   echo "  ${GRN}block ->${RST} ${dest#$root/}"
 }
 
+# Node repos: append ignore-scripts=true to .npmrc, then make the catch concrete
+# by listing the installed deps that actually declare a build hook (so they get
+# allowlisted, not used as an excuse to disable the protection).
+_h_npm_hardening() {
+  [[ -f "$root/package.json" ]] || return 0   # Node projects only
+  local rc="$root/.npmrc"
+  if [[ -f "$rc" ]] && grep -q 'ignore-scripts' "$rc" 2>/dev/null; then
+    echo "  ${DIM}ok (already set): .npmrc ignore-scripts${RST}"
+  else
+    [[ -f "$rc" ]] && printf '\n' >> "$rc"
+    cat "$TPL/repo/npmrc-hardened" >> "$rc"
+    echo "  ${GRN}block ->${RST} .npmrc ${DIM}(ignore-scripts=true)${RST}"
+  fi
+  # The catch, surfaced for THIS repo: which installed deps build via a hook?
+  if [[ -d "$root/node_modules" ]] && have jq; then
+    local hooked
+    hooked="$(find "$root/node_modules" -maxdepth 3 -name package.json -print0 2>/dev/null \
+      | xargs -0 jq -r 'select(.scripts.preinstall or .scripts.install or .scripts.postinstall) | .name // empty' 2>/dev/null \
+      | sort -u)"
+    if [[ -n "$hooked" ]]; then
+      local n; n="$(printf '%s\n' "$hooked" | grep -c .)"
+      echo "  ${YEL}heads-up${RST} ${n} installed dep(s) build via install scripts and will NOT run with ignore-scripts on:"
+      printf '%s\n' "$hooked" | sed 's/^/      /'
+      echo "  ${DIM}allowlist: npx --yes @lavamoat/allow-scripts auto && npx --yes @lavamoat/allow-scripts${RST}"
+      echo "  ${DIM}or one-off: npm rebuild <pkg> --ignore-scripts=false${RST}"
+    else
+      echo "  ${DIM}ok: no installed dep declares an install script - nothing to allowlist${RST}"
+    fi
+  else
+    echo "  ${DIM}tip: after 'npm ci --ignore-scripts', re-run to list deps that need a build (needs jq + node_modules)${RST}"
+  fi
+}
+
 # Confirm before writing (skipped with --yes, or when non-interactive).
 _h_confirm() {
   (( yes )) && return 0
@@ -471,6 +508,7 @@ cmd_harden() {
   echo "  .github/copilot-instructions.md         ${DIM}agent instructions${RST}"
   echo "  .github/copilot-content-exclusion.yml   ${DIM}paste into GitHub${RST}"
   echo "  .pre-commit-config.yaml, .gitleaks.toml ${DIM}gitleaks gate${RST}"
+  echo "  .npmrc                                  ${DIM}ignore-scripts (Node repos)${RST}"
   echo "  SECURITY.md, CODEOWNERS                 ${DIM}repo hygiene${RST}"
   echo "  .github/pull_request_template.md        ${DIM}PR checklist${RST}"
   echo "  .github/dependabot.yml                  ${DIM}dependency updates${RST}"
@@ -496,6 +534,8 @@ cmd_harden() {
   # gitleaks pre-commit gate (blocks any secret before it commits).
   _h_put "$root/.pre-commit-config.yaml" "$TPL/pre-commit-config.yaml"
   _h_put "$root/.gitleaks.toml"          "$TPL/gitleaks.toml"
+  # Block install-time script execution on Node repos + surface the build-script catch.
+  _h_npm_hardening
   # Repo hygiene + PR/CODEOWNERS + dependabot + codeql + ADO PR template.
   _h_put "$root/SECURITY.md"                              "$TPL/repo/SECURITY.md"
   _h_put "$root/CODEOWNERS"                               "$TPL/repo/CODEOWNERS"
@@ -642,6 +682,7 @@ case "$cmd" in
   enforce)          exec bash "$HERE/enforce.sh" "$@" ;;
   reminders|tips)   cmd_reminders ;;
   startup|hello)    cmd_startup ;;
+  version|--version|-v) echo "seckit $SECKIT_VERSION" ;;
   help|-h|--help)   cmd_help ;;
   *) echo "Unknown command: $cmd" >&2; cmd_help; exit 2 ;;
 esac

@@ -1,0 +1,24 @@
+# --- SecKit: block install-time script execution ---------------------------
+# Supply-chain worms (e.g. the redhat-cloud-services npm worm, May 2026) run
+# their payload from a package's preinstall / install / postinstall hook during
+# `npm install`, BEFORE any of your own code runs. This setting stops every
+# lifecycle script from executing on install, which neutralises that vector
+# even for a brand-new variant no scanner has catalogued yet.
+#
+# THE CATCH: a few legitimate deps compile native code in these hooks
+# (esbuild, sharp, bcrypt, better-sqlite3, node-gyp builds, ...). With this on
+# they will NOT build, and your OWN root postinstall/prepare (husky, prisma
+# generate) is skipped too. Do NOT turn this back off to fix that. Allowlist
+# the specific packages you trust instead:
+#
+#   npx --yes @lavamoat/allow-scripts auto   # write an allowlist into package.json
+#   npx --yes @lavamoat/allow-scripts        # run ONLY allowlisted scripts, post-install
+#
+# Dependency-free alternative for one vetted native dep:
+#   npm rebuild <pkg> --ignore-scripts=false
+#
+# For your own root scripts, run them explicitly in your setup/CI step:
+#   npm ci && npx --yes @lavamoat/allow-scripts && npm run prepare
+#
+# Vet anything new with `seckit scan` / `socket` BEFORE adding it.
+ignore-scripts=true
