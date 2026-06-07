@@ -51,7 +51,7 @@ $Tools = @(
   'osv-scanner|scanner: vulnerable dependencies|scoop install osv-scanner',
   'gitleaks|scanner: secrets in git history|scoop install gitleaks',
   'trufflehog|scanner: secrets in files|scoop install trufflehog',
-  'semgrep|scanner: code vulns (SQLi, XSS, CSRF)|pipx install semgrep (WSL or Docker on Windows)',
+  'semgrep|scanner: code vulns (SQLi, XSS, CSRF)|pipx install semgrep (recommended; WSL/Docker optional)',
   'checkov|scanner: IaC misconfig (Bicep, Terraform, Actions)|pipx install checkov',
   'socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli',
   'pre-commit|gate: runs gitleaks before each commit|pipx install pre-commit'
@@ -109,6 +109,98 @@ function Invoke-Startup {
   Show-Status
 }
 
+# Auto-install Scoop (Windows package manager) if it is missing.
+# Returns $true when scoop is available in the current session, $false if it could not be installed.
+function Install-ScoopIfMissing {
+  if (Have scoop) { return $true }
+  Write-Host 'scoop not found - installing automatically...' -ForegroundColor Yellow
+
+  # Scoop refuses to install from an elevated (admin) shell.
+  $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isAdmin) {
+    Write-Host '  Cannot install scoop from an admin shell - open a normal PowerShell and re-run.' -ForegroundColor Red
+    return $false
+  }
+
+  try {
+    if (-not (Have git)) {
+      Write-Host '  git is required to bootstrap scoop safely. Install git, then re-run.' -ForegroundColor Red
+      return $false
+    }
+
+    $scoopRoot = Join-Path $HOME 'scoop'
+    $scoopCurrent = Join-Path $scoopRoot 'apps\scoop\current'
+    $scoopBin = Join-Path $scoopCurrent 'bin'
+    if (-not (Test-Path $scoopCurrent)) {
+      Write-Host '+ git clone --depth 1 https://github.com/ScoopInstaller/Scoop %USERPROFILE%\scoop\apps\scoop\current'
+      git clone --depth 1 https://github.com/ScoopInstaller/Scoop $scoopCurrent | Out-Null
+    }
+
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+    # Refresh PATH for the current session so scoop is usable immediately.
+    $shimDir = Join-Path $HOME 'scoop\shims'
+    if ($scoopBin -notin ($env:PATH -split ';')) { $env:PATH = $env:PATH + ';' + $scoopBin }
+    if ($shimDir -notin ($env:PATH -split ';')) { $env:PATH = $env:PATH + ';' + $shimDir }
+    if (Have scoop) {
+      Write-Host '  scoop installed.' -ForegroundColor Green
+      return $true
+    }
+    Write-Host '  scoop installed but not yet in PATH - open a new shell and re-run.' -ForegroundColor Yellow
+    return $false
+  }
+  catch {
+    Write-Host ("  scoop install failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host '  Install manually from https://scoop.sh, then re-run.' -ForegroundColor Yellow
+    return $false
+  }
+}
+
+# Auto-install pipx (recommended Python CLI installer) if it is missing.
+# Returns $true when pipx is available in the current session, $false if it could not be installed.
+function Install-PipxIfMissing {
+  if (Have pipx) { return $true }
+  Write-Host 'pipx not found - installing automatically...' -ForegroundColor Yellow
+
+  try {
+    if (Have py) {
+      py -m pip install --user pipx
+      py -m pipx ensurepath
+    }
+    elseif (Have python) {
+      python -m pip install --user pipx
+      python -m pipx ensurepath
+    }
+    else {
+      Write-Host '  Python launcher not found. Install Python 3, then re-run.' -ForegroundColor Red
+      return $false
+    }
+
+    # Refresh PATH for current session so pipx commands are usable immediately.
+    $pyBase = Join-Path $env:APPDATA 'Python'
+    if (Test-Path $pyBase) {
+      $scriptDirs = Get-ChildItem -Path $pyBase -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'Scripts' } |
+        Where-Object { Test-Path $_ }
+      foreach ($dir in $scriptDirs) {
+        if ($dir -notin ($env:PATH -split ';')) { $env:PATH = $dir + ';' + $env:PATH }
+      }
+    }
+
+    if (Have pipx) {
+      Write-Host '  pipx installed.' -ForegroundColor Green
+      return $true
+    }
+
+    Write-Host '  pipx installed but not yet in PATH - open a new shell and re-run.' -ForegroundColor Yellow
+    return $false
+  }
+  catch {
+    Write-Host ("  pipx install failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host '  Install pipx manually: py -m pip install --user pipx ; py -m pipx ensurepath' -ForegroundColor Yellow
+    return $false
+  }
+}
+
 # Install the scanners via the platform package manager (scoop / pipx / npm).
 function Invoke-Install {
   param([switch]$All)
@@ -140,32 +232,38 @@ function Invoke-Install {
   foreach ($t in $chosen) {
     switch ($t) {
       'checkov' {
-        if (Have pipx) { Write-Host '+ pipx install checkov'; pipx install checkov }
-        elseif (Have pip) { Write-Host '+ pip install checkov'; pip install checkov }
-        else { Write-Host 'checkov needs Python (pipx or pip).' -ForegroundColor Yellow }
+        if ((Have pipx) -or (Install-PipxIfMissing)) { Write-Host '+ pipx install checkov'; pipx install checkov }
+        elseif (Have pip) { Write-Host '+ pip install checkov (fallback)'; pip install checkov }
+        else { Write-Host 'checkov needs Python (pipx recommended, pip fallback).' -ForegroundColor Yellow }
       }
-      'semgrep' { Write-Host 'semgrep: native Windows is unsupported - use WSL or Docker.' -ForegroundColor DarkGray }
+      'semgrep' {
+        if ((Have pipx) -or (Install-PipxIfMissing)) { Write-Host '+ pipx install semgrep'; pipx install semgrep }
+        elseif (Have pip) { Write-Host '+ pip install semgrep (fallback)'; pip install semgrep }
+        else { Write-Host 'semgrep needs Python (pipx recommended, pip fallback).' -ForegroundColor Yellow }
+      }
       'socket' {
         if (Have npm) { Write-Host '+ npm i -g @socketsecurity/cli'; npm i -g @socketsecurity/cli }
         else { Write-Host 'socket (optional) needs npm.' -ForegroundColor DarkGray }
       }
       'pre-commit' {
-        if (Have pipx) { Write-Host '+ pipx install pre-commit'; pipx install pre-commit }
-        elseif (Have pip) { Write-Host '+ pip install pre-commit'; pip install pre-commit }
-        else { Write-Host 'pre-commit needs Python (pipx or pip).' -ForegroundColor Yellow }
+        if ((Have pipx) -or (Install-PipxIfMissing)) { Write-Host '+ pipx install pre-commit'; pipx install pre-commit }
+        elseif (Have pip) { Write-Host '+ pip install pre-commit (fallback)'; pip install pre-commit }
+        else { Write-Host 'pre-commit needs Python (pipx recommended, pip fallback).' -ForegroundColor Yellow }
       }
       'az' {
-        if (Have scoop) {
+        if ((Have scoop) -or (Install-ScoopIfMissing)) {
           Write-Host '+ scoop install azure-cli'; scoop install azure-cli
           if (Have az) { Write-Host '+ az extension add --name azure-devops --upgrade'; az extension add --name azure-devops --upgrade 2>$null }
-        } else { Write-Host 'scoop not found - install it from https://scoop.sh, then re-run.' -ForegroundColor Yellow }
+        }
       }
       default { $scoopPkgs += $t }
     }
   }
   if ($scoopPkgs.Count) {
-    if (Have scoop) { Write-Host "+ scoop install $($scoopPkgs -join ' ')"; scoop install @scoopPkgs }
-    else { Write-Host 'scoop not found - install it from https://scoop.sh, then re-run.' -ForegroundColor Yellow }
+    if ((Have scoop) -or (Install-ScoopIfMissing)) {
+      Write-Host "+ scoop install $($scoopPkgs -join ' ')"
+      scoop install @scoopPkgs
+    }
   }
   Write-Host ''; Invoke-Doctor
 }

@@ -15,7 +15,8 @@
 
   Install:
     brew install osv-scanner gitleaks trufflehog semgrep checkov   # macOS / Linux
-    # Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install semgrep checkov
+    # Windows: scoop install osv-scanner gitleaks trufflehog ; pipx install semgrep checkov pre-commit
+    #          if pipx is missing: py -m pip install --user pipx ; py -m pipx ensurepath
     npm i -g @socketsecurity/cli                        # only if you use -Socket
 
 .PARAMETER Root
