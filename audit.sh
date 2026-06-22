@@ -303,5 +303,10 @@ if (( FAIL_RECOMMENDED > 0 )); then
   echo "${YEL}${FAIL_RECOMMENDED} recommended violation(s).${RST}"
 fi
 echo "${DIM}Report:${RST} $REPORT_FILE"
+if (( FAIL_REQUIRED > 0 || FAIL_RECOMMENDED > 0 )); then
+  echo
+  echo "${DIM}To apply the missing settings, run:${RST}"
+  echo "  ${BOLD}seckit enforce $kind $target --apply${RST}"
+fi
 
 (( FAIL_REQUIRED > 0 )) && exit 1 || exit 0

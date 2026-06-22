@@ -224,7 +224,7 @@ print_status() {
     raw="${REMINDERS[$(( RANDOM % ${#REMINDERS[@]} ))]}"
     text="${raw%% => *}"
     action="${raw#* => }"
-    echo "${BOLD}[reminder]${RST} ${text}"
+    echo "${BOLD}[daily reminder]${RST} ${text}"
     [[ "$action" != "$raw" ]] && echo "  ${GRN}->${RST} $(hl "$action")"
   fi
   if (( ok < n )); then
