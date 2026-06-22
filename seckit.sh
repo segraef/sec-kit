@@ -14,6 +14,7 @@
 #   seckit enforce <p> <s> write the missing settings (dry-run by default)
 #   seckit reminders    print all security reminders
 #   seckit startup      animated banner + one rotating reminder + tool health
+#   seckit update       pull the latest SecKit (git pull or re-clone)
 #   seckit version      print the installed SecKit version
 #   seckit help         this help
 #
@@ -234,7 +235,82 @@ print_status() {
   fi
 }
 
-cmd_help() { sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+cmd_help() {
+  cat <<EOF
+${BOLD}SecKit $SECKIT_VERSION${RST} - portable security kit for AI-assisted development
+
+${BOLD}USAGE${RST}
+  seckit [command] [args]
+
+${BOLD}COMMANDS${RST}
+  ${BOLD}menu${RST}                  interactive picker (default when run on a terminal)
+  ${BOLD}install${RST}               install missing scanners + clients (brew/npm/pipx)
+  ${BOLD}doctor${RST}                check that all scanners + clients are installed
+  ${BOLD}scan${RST} [DIR]            sweep repos for vulns, malicious packages, secrets
+  ${BOLD}scan-skill${RST} <target>   vet an AI skill / MCP server before installing
+  ${BOLD}harden${RST} [DIR]          drop AI-agent guardrails + PR/CODEOWNERS into a repo
+  ${BOLD}agent${RST} <sub>           install the SecKit agent prompt (claude|copilot|cursor)
+  ${BOLD}mcp${RST} <sub>             list/install/check MCP servers
+  ${BOLD}audit${RST} <platform> <scope>   read-only posture audit (github|ado)
+  ${BOLD}enforce${RST} <platform> <scope> write missing settings (dry-run by default)
+  ${BOLD}reminders${RST}             print all security reminders
+  ${BOLD}startup${RST}               animated banner + rotating reminder + tool health
+  ${BOLD}update${RST}                pull the latest SecKit from GitHub
+  ${BOLD}version${RST}               print installed version
+  ${BOLD}help${RST}                  this help
+
+${BOLD}EXAMPLES${RST}
+  seckit doctor                     check tool health
+  seckit scan .                     scan the current directory
+  seckit scan-skill @some/mcp       vet an MCP server
+  seckit harden .                   harden the current repo
+  seckit update                     update to the latest version
+  seckit audit github myorg/myrepo  posture audit a GitHub repo
+
+${BOLD}INSTALLATION${RST}
+  git clone https://github.com/segraef/sec-kit.git ~/sec-kit
+  echo 'export PATH="\$HOME/sec-kit:\$PATH"' >> ~/.zshrc
+
+${BOLD}UPDATE${RST}
+  seckit update     (or: git -C ~/sec-kit pull)
+
+${BOLD}MORE${RST}
+  https://github.com/segraef/sec-kit
+EOF
+}
+
+cmd_update() {
+  local repo="https://github.com/segraef/sec-kit.git"
+  local raw="https://raw.githubusercontent.com/segraef/sec-kit/main/version.txt"
+
+  # Fetch remote version to check whether an update is available.
+  local remote_version
+  remote_version="$(curl -sf "$raw" 2>/dev/null || true)"
+  if [[ -z "$remote_version" ]]; then
+    echo "${YEL}Could not reach GitHub - check your connection.${RST}" >&2; exit 1
+  fi
+
+  if [[ "$remote_version" == "$SECKIT_VERSION" ]]; then
+    echo "Already up to date (${GRN}$SECKIT_VERSION${RST})."; return
+  fi
+  echo "Update available: ${DIM}$SECKIT_VERSION${RST} -> ${GRN}$remote_version${RST}"
+
+  # Git clone install: just pull.
+  if git -C "$HERE" rev-parse --git-dir &>/dev/null; then
+    git -C "$HERE" pull --ff-only origin main
+    echo "${GRN}Done.${RST} Now at $(cat "$HERE/version.txt")."
+    return
+  fi
+
+  # Raw install: re-clone into a temp dir, then overwrite the install directory.
+  echo "Not a git repo - re-cloning to update..."
+  local tmp
+  tmp="$(mktemp -d)"
+  git clone --depth 1 "$repo" "$tmp/sec-kit"
+  rsync -a --delete --exclude='.git' "$tmp/sec-kit/" "$HERE/"
+  rm -rf "$tmp"
+  echo "${GRN}Done.${RST} Now at $(cat "$HERE/version.txt")."
+}
 
 # Interactive menu: shown when seckit is run with no arguments on a terminal.
 cmd_menu() {
@@ -254,6 +330,8 @@ cmd_menu() {
     echo "  ${GRN}7${RST}) audit       ${DIM}read-only posture audit (GitHub or ADO)${RST}"
     echo "  ${GRN}8${RST}) enforce     ${DIM}write the missing settings (dry-run by default)${RST}"
     echo "  ${GRN}9${RST}) reminders   ${DIM}show every security reminder${RST}"
+    echo "  ${GRN}u${RST}) update      ${DIM}pull the latest SecKit from GitHub${RST}"
+    echo "  ${GRN}h${RST}) help        ${DIM}show all commands and usage${RST}"
     echo "  ${GRN}q${RST}) quit"
     printf 'Select (q to quit): '
     read -r choice || break
@@ -347,6 +425,8 @@ cmd_menu() {
           *)           continue ;;
         esac ;;
       9|reminders)  cmd_reminders ;;
+      u|update)     cmd_update ;;
+      h|help)       cmd_help ;;
       q|Q|quit|exit) break ;;
       "")           continue ;;
       *)            echo "Unknown choice: $choice"; continue ;;
@@ -682,6 +762,7 @@ case "$cmd" in
   enforce)          exec bash "$HERE/enforce.sh" "$@" ;;
   reminders|tips)   cmd_reminders ;;
   startup|hello)    cmd_startup ;;
+  update|upgrade)   cmd_update ;;
   version|--version|-v) echo "seckit $SECKIT_VERSION" ;;
   help|-h|--help)   cmd_help ;;
   *) echo "Unknown command: $cmd" >&2; cmd_help; exit 2 ;;
