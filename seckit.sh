@@ -205,7 +205,7 @@ cmd_startup() {
   echo "${BOLD}Quickstart${RST}"
   echo "  ${GRN}${CMD} doctor${RST}      ${DIM}check the scanners are installed${RST}"
   echo "  ${GRN}${CMD} scan ~/Git${RST}  ${DIM}scan your repos before you work${RST}"
-  echo "  ${GRN}${CMD} harden${RST}      ${DIM}add Claude + Copilot guardrails to a repo${RST}"
+  echo "  ${GRN}${CMD} harden${RST}      ${DIM}add Claude + Copilot + Cursor guardrails to a repo${RST}"
   if (( ! onpath )); then
     echo "  ${DIM}enable the short 'seckit' command once:${RST}"
     echo "  ${DIM}ln -s \"$HERE/seckit.sh\" /usr/local/bin/seckit${RST}"
@@ -580,13 +580,14 @@ cmd_harden() {
   fi
   [[ -d "$target" ]] || { echo "Not a directory: $target" >&2; return 2; }
   local root; root="$(cd "$target" && pwd)"
-  echo "${BOLD}Harden${RST} ${root} ${DIM}(Claude + Copilot + repo files)${RST}"
+  echo "${BOLD}Harden${RST} ${root} ${DIM}(Claude + Copilot + Cursor + repo files)${RST}"
   echo "Will add ${DIM}(existing files skipped; --force to overwrite)${RST}:"
   echo "  .gitignore                              ${DIM}secret block${RST}"
   echo "  .claude/settings.json                   ${DIM}Claude deny rules${RST}"
   echo "  CLAUDE.md                               ${DIM}agent instructions${RST}"
   echo "  .github/copilot-instructions.md         ${DIM}agent instructions${RST}"
   echo "  .github/copilot-content-exclusion.yml   ${DIM}paste into GitHub${RST}"
+  echo "  .cursorignore                           ${DIM}Cursor index + context block${RST}"
   echo "  .pre-commit-config.yaml, .gitleaks.toml ${DIM}gitleaks gate${RST}"
   echo "  .npmrc                                  ${DIM}ignore-scripts (Node repos)${RST}"
   echo "  SECURITY.md, CODEOWNERS                 ${DIM}repo hygiene${RST}"
@@ -611,6 +612,8 @@ cmd_harden() {
   # GitHub Copilot: repo instructions + content-exclusion snippet to paste.
   _h_put "$root/.github/copilot-instructions.md"        "$TPL/agent-instructions.md"
   _h_put "$root/.github/copilot-content-exclusion.yml"  "$TPL/copilot-content-exclusion.yml"
+  # Cursor: gitignore-style block kept out of indexing and model context.
+  _h_put "$root/.cursorignore"                          "$TPL/repo/cursorignore"
   # gitleaks pre-commit gate (blocks any secret before it commits).
   _h_put "$root/.pre-commit-config.yaml" "$TPL/pre-commit-config.yaml"
   _h_put "$root/.gitleaks.toml"          "$TPL/gitleaks.toml"
@@ -651,7 +654,7 @@ cmd_harden() {
     fi
   fi
 
-  echo "${BOLD}Done.${RST} Claude + Copilot told to ignore secrets. Copilot users: paste"
+  echo "${BOLD}Done.${RST} Claude + Copilot + Cursor told to ignore secrets. Copilot users: paste"
   echo ".github/copilot-content-exclusion.yml into GitHub > Settings > Copilot."
 }
 

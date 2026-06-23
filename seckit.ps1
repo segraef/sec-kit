@@ -193,6 +193,7 @@ function Invoke-Harden {
     Drop 'secret-ignore.txt'      '.secret-ignore'
     Drop 'copilot-content-exclusion.yml' '.github/copilot-content-exclusion.yml'
     Drop 'claude-settings.json'   '.claude/settings.json'
+    Drop 'repo/cursorignore'      '.cursorignore'
     Drop 'agent-instructions.md'  'AGENTS.md'
     Drop 'repo/SECURITY.md'                 'SECURITY.md'
     Drop 'repo/CODEOWNERS'                  'CODEOWNERS'
