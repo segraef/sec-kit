@@ -174,7 +174,7 @@ seckit_is_clean_warning() {
   [[ -f "$log" ]] || return 1
   case "$key" in
     osv)      grep -q 'No package sources found' "$log" && return 0 ;;
-    gitleaks) grep -q 'no leaks found' "$log" && return 0 ;;
+    gitleaks) grep -qE 'no leaks found|leaks found: 0' "$log" && return 0 ;;
   esac
   return 1
 }
@@ -253,7 +253,10 @@ seckit_count() {
       n="$(grep -cE '(CVE-|GHSA-)[0-9A-Za-z-]+' "$log" 2>/dev/null || true)" ;;
     gitleaks)
       if grep -q 'no leaks found' "$log" 2>/dev/null; then n=0
-      else n="$(grep -oE '[0-9]+ leaks? found' "$log" 2>/dev/null | head -1 | awk '{print $1}')"
+      else
+        # "N leaks found" (old format) or "leaks found: N" (v8.19+ format)
+        n="$(grep -oE '[0-9]+ leaks? found' "$log" 2>/dev/null | head -1 | awk '{print $1}')"
+        [[ -z "$n" ]] && n="$(grep -oE 'leaks found: [0-9]+' "$log" 2>/dev/null | head -1 | grep -oE '[0-9]+$')"
       fi ;;
     trufflehog)
       n="$(grep -cE '^(Found |✓|Reason:)' "$log" 2>/dev/null || true)" ;;

@@ -50,8 +50,8 @@ $Tools = @(
   'az|Azure DevOps posture audit + enforce|scoop install azure-cli (then: az extension add --name azure-devops)',
   'osv-scanner|scanner: vulnerable dependencies|scoop install osv-scanner',
   'gitleaks|scanner: secrets in git history|scoop install gitleaks',
-  'trufflehog|scanner: secrets in files|scoop install trufflehog',
-  'semgrep|scanner: code vulns (SQLi, XSS, CSRF)|pipx install semgrep (WSL or Docker on Windows)',
+  'trufflehog|scanner: secrets in files|winget install TruffleSecurity.Trufflehog --scope user',
+  'semgrep|scanner: code vulns (SQLi, XSS, CSRF)|pip install semgrep  (or: winget install Semgrep.Semgrep --scope user)',
   'checkov|scanner: IaC misconfig (Bicep, Terraform, Actions)|pipx install checkov',
   'socket|scanner: malicious packages (needs npm)|npm i -g @socketsecurity/cli',
   'pre-commit|gate: runs gitleaks before each commit|pipx install pre-commit'
@@ -144,7 +144,17 @@ function Invoke-Install {
         elseif (Have pip) { Write-Host '+ pip install checkov'; pip install checkov }
         else { Write-Host 'checkov needs Python (pipx or pip).' -ForegroundColor Yellow }
       }
-      'semgrep' { Write-Host 'semgrep: native Windows is unsupported - use WSL or Docker.' -ForegroundColor DarkGray }
+      'semgrep' {
+        if (Have winget) { Write-Host '+ winget install Semgrep.Semgrep --scope user'; winget install Semgrep.Semgrep --scope user }
+        elseif (Have pipx) { Write-Host '+ pipx install semgrep'; pipx install semgrep }
+        elseif (Have pip)  { Write-Host '+ pip install semgrep';  pip install semgrep  }
+        else { Write-Host 'semgrep needs winget or Python (pip/pipx).' -ForegroundColor Yellow }
+      }
+      'trufflehog' {
+        if (Have winget) { Write-Host '+ winget install TruffleSecurity.Trufflehog --scope user'; winget install TruffleSecurity.Trufflehog --scope user }
+        elseif (Have scoop) { Write-Host '+ scoop install trufflehog'; scoop install trufflehog }
+        else { Write-Host 'trufflehog needs winget (recommended) or scoop.' -ForegroundColor Yellow }
+      }
       'socket' {
         if (Have npm) { Write-Host '+ npm i -g @socketsecurity/cli'; npm i -g @socketsecurity/cli }
         else { Write-Host 'socket (optional) needs npm.' -ForegroundColor DarkGray }

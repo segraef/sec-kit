@@ -12,7 +12,7 @@ which to install (or pass `--all` / `-y` to take them all):
 
 ```bash
 bash seckit.sh install        # macOS / Linux: Homebrew + npm
-pwsh ./seckit.ps1 install     # Windows: scoop + pipx + npm
+pwsh ./seckit.ps1 install     # Windows: winget/scoop + pipx + npm
 ```
 
 Or install them by hand:
@@ -20,7 +20,7 @@ Or install them by hand:
 ```bash
 brew install jq yq gh azure-cli osv-scanner gitleaks trufflehog semgrep checkov pre-commit
 az extension add --name azure-devops --upgrade   # for ADO audit / enforce
-# Windows: scoop install jq yq gh azure-cli osv-scanner gitleaks trufflehog ; pipx install checkov pre-commit
+# Windows: winget install TruffleSecurity.Trufflehog --scope user ; pip install semgrep checkov pre-commit
 npm i -g @socketsecurity/cli                                    # only for socket
 ```
 
@@ -32,8 +32,19 @@ chmod +x seckit.sh banner.sh scan_repos.sh
 ln -s "$PWD/seckit.sh" /usr/local/bin/seckit
 ```
 
-> `seckit install` uses Homebrew on macOS/Linux and scoop/pipx on Windows.
-> `semgrep` has no native Windows build - use WSL or Docker there.
+> `seckit install` uses Homebrew on macOS/Linux and winget/scoop/pipx on Windows.
+> Missing scanners are skipped automatically — the scan runs with whatever is installed.
+
+### Corporate / no-admin machines
+
+SecKit itself needs no installation and no admin rights — it is a plain shell script. The scanners install entirely to user space via the right package manager:
+
+- **pip / pipx** — always user-space (`~/.local`, `%APPDATA%\Python`), never touches system directories.
+- **winget `--scope user`** — forces user-level installation; avoids MSI system installers. SecKit uses this flag by default on Windows.
+- **scoop** — installs to `%USERPROFILE%\scoop`, no admin needed for scoop itself. Exception: packages whose upstream binary is an MSI (notably 7zip, which trufflehog depended on via scoop) can be blocked by corporate policy. SecKit now routes trufflehog through winget to avoid this.
+- **npm -g** — user-space when the npm prefix is under the user profile (the default on most installs).
+
+If a scanner still cannot be installed in your environment, `seckit doctor` marks it missing and `seckit scan` skips it — the remaining scanners run normally.
 
 Run with no arguments on a terminal to open the interactive menu; inside it, `b`
 backs out of a submenu and `q` quits. In a pipe or CI (no TTY) the no-arg form
@@ -53,7 +64,7 @@ shows what is present and how to install the rest.
 | `osv-scanner` | dependencies with known vulnerabilities (CVEs) | - |
 | `gitleaks` | secrets in git history | - |
 | `trufflehog` | secrets in working files | - |
-| `semgrep` | code-level vulnerabilities (SQLi, XSS, CSRF, injection) | network (fetches rules) |
+| `semgrep` | code-level vulnerabilities (SQLi, XSS, CSRF, injection) | network (fetches rules); install via `pip install semgrep` or `winget install Semgrep.Semgrep --scope user` |
 | `checkov` | infrastructure-as-code misconfig (Bicep, Terraform, Actions, Docker, K8s) | - |
 | `socket` (opt-in) | malicious package *behaviour*, not just CVEs | `npm` |
 | `pre-commit` | runs the gitleaks gate before every `git commit` | activated by `seckit harden` |
@@ -221,6 +232,28 @@ Reminders live in [`../reminders.txt`](../reminders.txt), one per line as
 `reminder => how to tackle it`. The part after `=>` is actionable: a `seckit`
 command where one helps (highlighted on screen), otherwise the manual step. Add
 your own by appending a line.
+
+## Reporting a bug
+
+```bash
+seckit bug        # prompts for a title, collects diagnostics, opens a GitHub issue
+```
+
+`seckit bug` gathers SecKit version, OS, Node version, and `seckit doctor` output into a pre-filled issue body, then:
+
+- If `gh` is authenticated: creates the issue directly via `gh issue create`.
+- Otherwise: opens `github.com/segraef/sec-kit/issues/new` in the browser with the body pre-filled.
+
+### Debug mode
+
+Run any command with `--debug` (or set `SECKIT_DEBUG=1`) to capture a full trace log:
+
+```bash
+seckit --debug scan .
+SECKIT_DEBUG=1 seckit scan .
+```
+
+The log is written to `~/.seckit/logs/debug-<timestamp>.log` and captures `set -x` output (every command and its arguments). When you run `seckit bug` after a debug session, the last 100 lines of the log are included in the issue body automatically.
 
 ## Files
 

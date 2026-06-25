@@ -6,6 +6,7 @@
 #   seckit install      install any missing scanners + clients (brew/npm/pipx)
 #   seckit doctor       check that scanners + clients are installed
 #   seckit scan [DIR]   sweep local repos for vulns, malicious packages, secrets
+#   seckit bug          report an error or unexpected behaviour on GitHub
 #   seckit scan-skill <t> vet an AI skill / MCP server before you install it
 #   seckit harden [DIR] drop AI-agent guardrails + PR/CODEOWNERS into a repo
 #   seckit agent <sub>  install the SecKit agent prompt for Claude/Copilot/Cursor
@@ -15,8 +16,13 @@
 #   seckit reminders    print all security reminders
 #   seckit startup      animated banner + one rotating reminder + tool health
 #   seckit update       pull the latest SecKit (git pull or re-clone)
+#   seckit bug          report an error or unexpected behaviour on GitHub
 #   seckit version      print the installed SecKit version
 #   seckit help         this help
+#
+# Debug mode (captures set -x trace + stderr to ~/.seckit/logs/):
+#   seckit --debug scan .     pass --debug/-d before any command
+#   SECKIT_DEBUG=1 seckit scan .   or set the env var
 #
 # Run it before you start work in any repo. Reminders live in reminders.txt.
 #
@@ -26,6 +32,33 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Single source of truth, maintained by release-please (see version.txt).
 SECKIT_VERSION="$(cat "$HERE/version.txt" 2>/dev/null || echo dev)"
+
+# Debug mode: SECKIT_DEBUG=1 (env) or --debug flag (CLI).
+# Writes a timestamped log to ~/.seckit/logs/ and enables set -x so every
+# command and its arguments are recorded. The log path is picked up by
+# cmd_bugreport so it can be attached to a GitHub issue automatically.
+SECKIT_DEBUG="${SECKIT_DEBUG:-0}"
+SECKIT_LOG_FILE=""
+_seckit_debug_init() {
+  local ts; ts="$(date +%Y%m%d-%H%M%S)"
+  local log_dir="$HOME/.seckit/logs"
+  mkdir -p "$log_dir"
+  SECKIT_LOG_FILE="${log_dir}/debug-${ts}.log"
+  {
+    echo "# seckit debug log"
+    echo "# date:    $(date)"
+    echo "# version: $SECKIT_VERSION"
+    echo "# os:      $(uname -srm 2>/dev/null)"
+    echo "# cmd:     $0 $*"
+    echo ""
+  } > "$SECKIT_LOG_FILE"
+  # Route set -x trace (stderr) through tee so it appears on the terminal
+  # AND lands in the log file.
+  BASH_XTRACEFD=2
+  exec 2> >(tee -a "$SECKIT_LOG_FILE" >&2)
+  set -x
+  printf '%s[debug]%s logging to %s\n' "$DIM" "$RST" "$SECKIT_LOG_FILE"
+}
 
 # Optional animated banner (defines banner(); does not auto-play here because
 # this script runs non-interactively).
@@ -191,6 +224,71 @@ cmd_reminders() {
   done
 }
 
+cmd_bugreport() {
+  local REPO="segraef/sec-kit"
+  local title="${1:-}"
+
+  # Collect diagnostics silently.
+  local version="$SECKIT_VERSION"
+  local os; os="$(uname -srm 2>/dev/null || echo unknown)"
+  local node_v; node_v="$(node --version 2>/dev/null || echo 'not installed')"
+  local doctor_out; doctor_out="$(cmd_doctor 2>&1)"
+
+  echo "${BOLD}File a bug report${RST}  ${DIM}→ github.com/${REPO}${RST}"
+  echo
+
+  if [[ -z "$title" ]]; then
+    printf 'Issue title (e.g. "seckit scan crashes on macOS"): '
+    read -r title
+    [[ -z "$title" ]] && title="Bug report"
+  fi
+
+  local desc=""
+  printf 'Briefly describe what went wrong (Enter to leave blank): '
+  read -r desc
+
+  # Include the debug log tail if a session log was captured.
+  local log_section=""
+  if [[ -n "$SECKIT_LOG_FILE" && -f "$SECKIT_LOG_FILE" ]]; then
+    local log_tail; log_tail="$(tail -100 "$SECKIT_LOG_FILE")"
+    log_section="$(printf '\n\n**Debug log** (`%s`):\n```\n%s\n```' "$SECKIT_LOG_FILE" "$log_tail")"
+  fi
+
+  local body
+  body="$(printf '**SecKit version:** %s\n**OS:** %s\n**Node:** %s\n\n**Tool status:**\n```\n%s\n```\n\n**What happened:**\n%s\n\n**Steps to reproduce:**\n```\nseckit ...\n```\n\n**Expected:** <!-- what should have happened -->\n\n**Actual:** <!-- paste the full output -->%s' \
+    "$version" "$os" "$node_v" "$doctor_out" "${desc:-<!-- describe the error -->}" "$log_section")"
+
+  echo
+  if have gh; then
+    echo "Creating issue via gh..."
+    gh issue create --repo "$REPO" --title "$title" --body "$body"
+  else
+    # Build a pre-filled GitHub URL. python3 for percent-encoding; sed fallback.
+    local enc_title enc_body
+    if have python3; then
+      enc_title="$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))" "$title" 2>/dev/null)"
+      enc_body="$(python3  -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))" "$body"  2>/dev/null)"
+    else
+      enc_title="$(printf '%s' "$title" | sed 's/ /+/g')"
+      enc_body=""
+    fi
+    local url="https://github.com/${REPO}/issues/new?title=${enc_title}&body=${enc_body}"
+    echo "Opening GitHub in your browser..."
+    if have open; then open "$url"
+    elif have xdg-open; then xdg-open "$url"
+    else
+      echo "Open this URL to file the issue:"
+      echo "$url"
+    fi
+    # If encoding failed (no python3), print the body so the user can paste it.
+    if [[ -z "$enc_body" ]]; then
+      echo
+      echo "${DIM}Paste this into the issue body:${RST}"
+      printf '%s\n' "$body"
+    fi
+  fi
+}
+
 cmd_startup() {
   type banner >/dev/null 2>&1 && banner
 
@@ -256,6 +354,7 @@ ${BOLD}COMMANDS${RST}
   ${BOLD}reminders${RST}             print all security reminders
   ${BOLD}startup${RST}               animated banner + rotating reminder + tool health
   ${BOLD}update${RST}                pull the latest SecKit from GitHub
+  ${BOLD}bug${RST}                   report an error or unexpected behaviour on GitHub
   ${BOLD}version${RST}               print installed version
   ${BOLD}help${RST}                  this help
 
@@ -273,6 +372,13 @@ ${BOLD}INSTALLATION${RST}
 
 ${BOLD}UPDATE${RST}
   seckit update     (or: git -C ~/sec-kit pull)
+
+${BOLD}DEBUG MODE${RST}
+  Pass ${BOLD}--debug${RST} (or ${BOLD}-d${RST}) before any command, or set ${BOLD}SECKIT_DEBUG=1${RST}:
+  seckit --debug scan .
+  SECKIT_DEBUG=1 seckit scan .
+  Writes a timestamped trace log to ${BOLD}~/.seckit/logs/${RST}. Run ${BOLD}seckit bug${RST}
+  to attach the log automatically when filing a GitHub issue.
 
 ${BOLD}MORE${RST}
   https://github.com/segraef/sec-kit
@@ -331,6 +437,7 @@ cmd_menu() {
     echo "  ${GRN}8${RST}) enforce     ${DIM}write the missing settings (dry-run by default)${RST}"
     echo "  ${GRN}9${RST}) reminders   ${DIM}show every security reminder${RST}"
     echo "  ${GRN}u${RST}) update      ${DIM}pull the latest SecKit from GitHub${RST}"
+    echo "  ${GRN}b${RST}) bug         ${DIM}report an error or unexpected behaviour${RST}"
     echo "  ${GRN}h${RST}) help        ${DIM}show all commands and usage${RST}"
     echo "  ${GRN}q${RST}) quit"
     printf 'Select (q to quit): '
@@ -426,6 +533,7 @@ cmd_menu() {
         esac ;;
       9|reminders)  cmd_reminders ;;
       u|update)     cmd_update ;;
+      b|bug|report) cmd_bugreport ;;
       h|help)       cmd_help ;;
       q|Q|quit|exit) break ;;
       "")           continue ;;
@@ -748,6 +856,19 @@ USAGE
 
 # ---------- Dispatch --------------------------------------------------------
 # No args on a terminal -> interactive menu; no args in a pipe/CI -> help.
+# Strip --debug / -d from argv before command dispatch; activate debug mode.
+_raw_args=("$@")
+_filtered_args=()
+for _a in "${_raw_args[@]+"${_raw_args[@]}"}"; do
+  case "$_a" in
+    --debug|-d) SECKIT_DEBUG=1 ;;
+    *)          _filtered_args+=("$_a") ;;
+  esac
+done
+set -- "${_filtered_args[@]+"${_filtered_args[@]}"}"
+unset _raw_args _filtered_args _a
+(( SECKIT_DEBUG )) && _seckit_debug_init "$@"
+
 cmd="${1:-}"; shift 2>/dev/null || true
 if [[ -z "$cmd" ]]; then
   if [[ -t 0 && -t 1 ]]; then cmd="menu"; else cmd="help"; fi
@@ -766,7 +887,10 @@ case "$cmd" in
   reminders|tips)   cmd_reminders ;;
   startup|hello)    cmd_startup ;;
   update|upgrade)   cmd_update ;;
+  bug|report|issue) cmd_bugreport "$@" ;;
   version|--version|-v) echo "seckit $SECKIT_VERSION" ;;
   help|-h|--help)   cmd_help ;;
-  *) echo "Unknown command: $cmd" >&2; cmd_help; exit 2 ;;
+  *) echo "${RED}Unknown command: $cmd${RST}" >&2
+     echo "${DIM}Run 'seckit help' for usage. If this is a bug, run 'seckit bug' to report it.${RST}" >&2
+     exit 2 ;;
 esac

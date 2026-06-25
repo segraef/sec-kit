@@ -21,7 +21,7 @@ pwsh ./seckit.ps1           # Windows
 | Action        | What it does                                                                                                                                                   |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **doctor**    | Reports which scanners and clients (jq, yq, gh, az, gitleaks, semgrep, checkov, osv-scanner, trufflehog, pre-commit) are installed and which are missing.      |
-| **install**   | Installs every missing scanner and client via brew/npm/pipx/scoop. Run this once on a fresh machine.                                                           |
+| **install**   | Installs every missing scanner and client via brew/winget/scoop/pipx/npm. No admin rights required — all installs target user space. Run this once on a fresh machine. Missing scanners are skipped gracefully at scan time, so you can scan immediately with whatever is available. |
 | **scan**      | Sweeps a folder of repos for vulnerable dependencies, code/IaC flaws, malware and secrets. Pick all scanners or a subset (osv, gitleaks, trufflehog, semgrep, checkov, socket). |
 | **scan-skill** | Statically vets an AI agent skill or MCP server (directory, `.zip` or git URL) before you install it: prompt-injection, data exfiltration, credential theft, supply-chain RCE, obfuscation, over-broad agency and MCP tool poisoning. Never executes the target; prints a 0-100 risk verdict and a markdown report. |
 | **harden**    | Drops pre-commit, gitleaks, SECURITY.md, CODEOWNERS, dependabot, CodeQL and PR templates into a repo so the next commit is clean. Also writes the AI-assistant guardrails that keep secrets out of context: Claude `settings.json` deny rules, a GitHub Copilot content-exclusion file, and a `.cursorignore`. On Node repos it also sets `ignore-scripts=true` in `.npmrc` to block install-time supply-chain worms (see below). |
@@ -30,6 +30,7 @@ pwsh ./seckit.ps1           # Windows
 | **audit**     | Read-only posture check against a GitHub org/repo or Azure DevOps project/repo. Safe to run anywhere because every call is a `GET`.                            |
 | **enforce**   | Writes the missing settings flagged by `audit`. Dry-run by default; pass `--apply` / `-Apply` to actually write.                                               |
 | **reminders** | Prints every security reminder in the kit. Handy as a checklist.                                                                                               |
+| **bug**       | Collects diagnostics (version, OS, `doctor` output) and opens a pre-filled GitHub issue — via `gh` if authenticated, otherwise in the browser. Pass `--debug` before any command to capture a full trace log at `~/.seckit/logs/`; the log is attached to the issue automatically. |
 
 ## Run it in CI
 
