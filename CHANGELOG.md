@@ -10,6 +10,13 @@ From v0.1.0 onward this file is generated automatically by
 [Conventional Commits](https://www.conventionalcommits.org/). Do not edit
 released sections by hand; write a good commit message instead.
 
+## [0.1.2](https://github.com/segraef/sec-kit/compare/v0.1.1...v0.1.2) (2026-06-25)
+
+
+### Added
+
+* add bug report command, debug mode, Windows no-admin install, and fix gitleaks count ([542082e](https://github.com/segraef/sec-kit/commit/542082e86d2871a50e6f5ef618f65f239b4aa429))
+
 ## [0.1.1](https://github.com/segraef/sec-kit/compare/v0.1.0...v0.1.1) (2026-06-24)
 
 
