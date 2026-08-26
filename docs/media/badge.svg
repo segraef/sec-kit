@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="148" height="20" role="img" aria-label="scanned with: SecKit">
+  <title>scanned with: SecKit</title>
+  <linearGradient id="rainbow" x2="100%" y2="0">
+    <stop offset="0" stop-color="#e40303"/>
+    <stop offset=".2" stop-color="#ff8c00"/>
+    <stop offset=".4" stop-color="#ffed00"/>
+    <stop offset=".6" stop-color="#008026"/>
+    <stop offset=".8" stop-color="#24408e"/>
+    <stop offset="1" stop-color="#732982"/>
+  </linearGradient>
+  <linearGradient id="shade" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <clipPath id="round"><rect width="148" height="20" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#round)">
+    <rect width="87" height="20" fill="#555"/>
+    <rect x="87" width="61" height="20" fill="url(#rainbow)"/>
+    <rect width="148" height="20" fill="url(#shade)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+    <text x="43.5" y="15" fill="#010101" fill-opacity=".3">scanned with</text>
+    <text x="43.5" y="14">scanned with</text>
+    <text x="117.5" y="15" fill="#010101" fill-opacity=".5" font-weight="bold">SecKit</text>
+    <text x="117.5" y="14" font-weight="bold">SecKit</text>
+  </g>
+</svg>
