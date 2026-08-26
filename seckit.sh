@@ -702,6 +702,7 @@ cmd_harden() {
   echo "  .github/pull_request_template.md        ${DIM}PR checklist${RST}"
   echo "  .github/dependabot.yml                  ${DIM}dependency updates${RST}"
   echo "  .github/workflows/codeql.yml            ${DIM}code scanning${RST}"
+  echo "  .github/workflows/seckit-scan.yml       ${DIM}SecKit scan on every push/PR${RST}"
   echo "  .azuredevops/pull_request_template.md   ${DIM}ADO PR checklist${RST}"
   _h_confirm || { echo "Cancelled."; return 0; }
   echo
@@ -727,12 +728,13 @@ cmd_harden() {
   _h_put "$root/.gitleaks.toml"          "$TPL/gitleaks.toml"
   # Block install-time script execution on Node repos + surface the build-script catch.
   _h_npm_hardening
-  # Repo hygiene + PR/CODEOWNERS + dependabot + codeql + ADO PR template.
+  # Repo hygiene + PR/CODEOWNERS + dependabot + codeql + SecKit CI scan + ADO PR template.
   _h_put "$root/SECURITY.md"                              "$TPL/repo/SECURITY.md"
   _h_put "$root/CODEOWNERS"                               "$TPL/repo/CODEOWNERS"
   _h_put "$root/.github/pull_request_template.md"         "$TPL/repo/pull_request_template.md"
   _h_put "$root/.github/dependabot.yml"                   "$TPL/repo/dependabot.yml"
   _h_put "$root/.github/workflows/codeql.yml"             "$TPL/repo/codeql.yml"
+  _h_put "$root/.github/workflows/seckit-scan.yml"        "$TPL/repo/seckit-scan.yml"
   _h_put "$root/.azuredevops/pull_request_template.md"    "$TPL/repo/ado-pull-request-template.md"
 
   # Activate the hook so it actually runs on `git commit`. Dropping the
@@ -762,6 +764,8 @@ cmd_harden() {
     fi
   fi
 
+  echo "Badge for the README:"
+  echo "  [![Scanned with SecKit](https://raw.githubusercontent.com/segraef/sec-kit/main/docs/media/badge.svg)](https://github.com/segraef/sec-kit)"
   echo "${BOLD}Done.${RST} Claude + Copilot + Cursor told to ignore secrets. Copilot users: paste"
   echo ".github/copilot-content-exclusion.yml into GitHub > Settings > Copilot."
 }

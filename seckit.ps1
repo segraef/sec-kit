@@ -210,9 +210,12 @@ function Invoke-Harden {
     Drop 'repo/pull_request_template.md'    '.github/pull_request_template.md'
     Drop 'repo/dependabot.yml'              '.github/dependabot.yml'
     Drop 'repo/codeql.yml'                  '.github/workflows/codeql.yml'
+    Drop 'repo/seckit-scan.yml'             '.github/workflows/seckit-scan.yml'
     Drop 'repo/ado-pull-request-template.md' '.azuredevops/pull_request_template.md'
     if (Have pre-commit) { Write-Host '+ pre-commit install'; pre-commit install | Out-Null }
     else { Write-Host '  pre-commit not installed - run seckit install.' -ForegroundColor Yellow }
+    Write-Host 'Badge for the README:'
+    Write-Host '  [![Scanned with SecKit](https://raw.githubusercontent.com/segraef/sec-kit/main/docs/media/badge.svg)](https://github.com/segraef/sec-kit)'
   }
   finally { Pop-Location }
 }

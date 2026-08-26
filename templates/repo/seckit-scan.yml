@@ -1,0 +1,70 @@
+# SecKit security scan - portable drop-in for any repo.
+#
+# Runs the full SecKit flow in CI: `seckit install` to provision the scanners,
+# then `seckit scan` over the checked-out code, and publishes the markdown
+# report as a build artifact.
+#
+# Copy this file into any repo's .github/workflows/. It clones SecKit at run
+# time, so the only thing the target repo needs is this one file. Inside the
+# SecKit repo itself you can drop the "Get SecKit" step and call ./seckit.sh.
+#
+# Notes:
+# - GitHub-hosted ubuntu runners ship Homebrew, which `seckit install` uses.
+#   The install step is the slow one (a few minutes); cache or pin if it bites.
+# - gitleaks needs full git history, hence fetch-depth: 0.
+# - The scan is soft-fail by default (findings -> warning + artifact, not a
+#   red build). Flip the "Gate" step to `exit 1` to block merges on findings.
+# - socket is skipped (it needs `socket login`); drop --skip=socket to include.
+name: seckit-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SECKIT_REPORT_DIR: ${{ github.workspace }}/seckit-reports
+
+jobs:
+  seckit:
+    name: seckit install + scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for gitleaks)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get SecKit
+        run: git clone --depth 1 https://github.com/segraef/sec-kit.git "$RUNNER_TEMP/sec-kit"
+
+      - name: Install scanners (seckit install)
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          bash "$RUNNER_TEMP/sec-kit/seckit.sh" install --all -y
+
+      - name: Scan (seckit scan)
+        id: scan
+        continue-on-error: true
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          bash "$RUNNER_TEMP/sec-kit/seckit.sh" scan "$GITHUB_WORKSPACE" --skip=socket
+
+      - name: Publish report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seckit-report
+          path: ${{ env.SECKIT_REPORT_DIR }}/*.md
+          if-no-files-found: warn
+
+      - name: Gate
+        if: steps.scan.outcome == 'failure'
+        run: |
+          echo "::warning::SecKit reported findings - download the seckit-report artifact to triage."
+          # To block merges on findings instead, replace the line above with:
+          #   exit 1
