@@ -2,8 +2,8 @@
 # both a CI gate and a worked example users can copy.
 #
 # Hardening notes:
-# - For stricter setups, pin every `uses:` ref to a full commit SHA and let
-#   dependabot bump them. We use @vN tags here so the example stays readable.
+# - Every `uses:` ref is pinned to a full commit SHA (tag in the trailing
+#   comment); dependabot bumps them. Semgrep blocks mutable tags.
 # - `permissions:` is read-only; widen per-job only when a job truly needs it.
 # - The gitleaks job needs full history (fetch-depth: 0).
 name: ci
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: Lint shell scripts
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Lint PowerShell scripts
         shell: pwsh
         run: |
@@ -52,11 +52,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Scan history for secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -67,7 +67,7 @@ jobs:
       image: semgrep/semgrep
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: SAST scan
         run: semgrep scan --config auto --error --quiet .
 
@@ -76,9 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: IaC scan
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@ec0fde72821aabf10fd9bb57713c5771f9786ab9 # v12.999.0
         with:
           quiet: true
           soft_fail: false
