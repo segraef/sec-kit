@@ -10,6 +10,14 @@ From v0.1.0 onward this file is generated automatically by
 [Conventional Commits](https://www.conventionalcommits.org/). Do not edit
 released sections by hand; write a good commit message instead.
 
+## [0.1.3](https://github.com/segraef/sec-kit/compare/v0.1.2...v0.1.3) (2026-08-26)
+
+
+### Added
+
+* harden drops seckit-scan workflow, rainbow badge ([6d1a8ae](https://github.com/segraef/sec-kit/commit/6d1a8ae217e2e8d78e6d6b4fd13d29bcd90ce585))
+* harden drops the seckit-scan workflow and adds a rainbow SecKit badge ([4211fed](https://github.com/segraef/sec-kit/commit/4211fed8c2f975861ff371a421c97ae733c77979))
+
 ## [0.1.2](https://github.com/segraef/sec-kit/compare/v0.1.1...v0.1.2) (2026-06-25)
 
 
