@@ -38,7 +38,7 @@ as skipped. Do not fail the whole run because one tool is missing.
 3. **Secrets in working files.** Prefer
    `trufflehog filesystem --no-update`. Without it, scan tracked files for
    the same patterns; skip the deny-list paths above.
-4. **Code vulnerabilities.** Prefer `semgrep --config auto --error`. Without
+4. **Code vulnerabilities.** Prefer `semgrep --config p/default --metrics=off --error`. Without
    it, look for SQL string concatenation in DB calls, unparameterised shell
    in `exec`/`subprocess`/`Process.Start`, missing CSRF tokens on state-
    changing routes, and unsanitised reflection into HTML/JS.

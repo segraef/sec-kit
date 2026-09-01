@@ -12,6 +12,10 @@
 #   --skip=LIST  run all scanners except these
 #   names:       osv, gitleaks, trufflehog, semgrep, checkov, socket
 #
+# Monorepos: a package.json dir nested inside a discovered repo is scanned as
+# part of that repo (scanners recurse from the root); only a nested .git makes
+# it a separate repo.
+#
 # Scanners (each is skipped automatically if not installed):
 #   osv          known-vulnerable dependencies (CVEs)
 #   gitleaks     secrets in git history
@@ -36,13 +40,16 @@ for arg in "$@"; do
     --socket)  RUN_SOCKET=1 ;;
     --only=*)  ONLY="${arg#*=}" ;;
     --skip=*)  SKIP="${arg#*=}" ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     --*)       echo "Unknown flag: $arg" >&2; exit 2 ;;
     *)         ROOT="$arg" ;;
   esac
 done
 [[ -d "$ROOT" ]] || { echo "Not a directory: $ROOT" >&2; exit 2; }
 ROOT="$(cd "$ROOT" && pwd)"
+
+# semgrep: never send metrics; also read by registry ruleset fetches.
+export SEMGREP_SEND_METRICS=off
 
 # ---------- Colours (only when writing to a terminal) -----------------------
 if [[ -t 1 ]]; then
@@ -111,9 +118,19 @@ fi
 # ---------- Find repos (a dir holding .git or package.json) -----------------
 # bash 3.2 safe: no associative arrays or mapfile. dirname each marker, dedupe
 # with sort -u, read into a plain indexed array.
+# Monorepo dedupe: sort -u is lexicographic, so a parent repo always precedes
+# its children; drop any candidate nested under a kept repo unless it has a
+# .git of its own (vendored/nested repo).
 repos=()
 while IFS= read -r d; do
-  [[ -n "$d" ]] && repos+=("$d")
+  [[ -n "$d" ]] || continue
+  keep=1
+  for r in ${repos[@]+"${repos[@]}"}; do
+    case "$d/" in
+      "$r"/*) [[ -e "$d/.git" ]] || keep=0; break ;;
+    esac
+  done
+  (( keep )) && repos+=("$d")
 done < <(find "$ROOT" \
   -type d \( -name node_modules -o -name .next -o -name dist -o -name build \
              -o -name out -o -name coverage -o -name .turbo -o -name .svelte-kit \
@@ -164,6 +181,19 @@ run_scan() {
 # trufflehog: keep findings (stdout) but drop noisy progress (stderr).
 _seckit_trufflehog() {
   trufflehog filesystem "$1" --no-update --fail 2>/dev/null
+}
+
+# Native mobile source (Swift/Kotlin/ObjC, or an Android manifest) outside
+# dependency dirs? If present, semgrep also gets the p/mobsfscan MASVS
+# ruleset. Bare *.java does NOT trigger: backend Java repos would newly fire
+# mobile crypto rules and turn red vs previous releases.
+_seckit_has_mobile_src() {
+  local f
+  f="$(find "$1" \( -name node_modules -o -name .git -o -name Pods \) -prune -o \
+    -type f \( -name '*.swift' -o -name '*.kt' -o -name '*.m' -o -name '*.mm' \
+                -o -name 'AndroidManifest.xml' \) \
+    -print 2>/dev/null | head -n 1)"
+  [[ -n "$f" ]]
 }
 
 # Some scanners exit non-zero on conditions that are not real findings
@@ -217,8 +247,16 @@ for repo in "${repos[@]}"; do
   fi
 
   if want semgrep && have semgrep; then
-    echo "${DIM}- semgrep (code vulns: SQLi, XSS, CSRF)${RST}"
-    _seckit_run_and_count semgrep "$repo" semgrep scan --config auto --error --quiet "$repo" || hit=1
+    # p/default instead of auto: auto refuses --metrics=off (and would tie the
+    # scan to the project URL via the registry). Same community default rules.
+    sg_args=(--config p/default)
+    sg_label="code vulns: SQLi, XSS, CSRF"
+    if _seckit_has_mobile_src "$repo"; then
+      sg_args+=(--config p/mobsfscan)
+      sg_label="code vulns + mobile (MASVS)"
+    fi
+    echo "${DIM}- semgrep (${sg_label})${RST}"
+    _seckit_run_and_count semgrep "$repo" semgrep scan "${sg_args[@]}" --metrics=off --error --quiet "$repo" || hit=1
   fi
 
   if want checkov && have checkov; then
