@@ -76,6 +76,9 @@ seckit scan ~/Git                       # all installed scanners (except socket)
 seckit scan ~/Git --socket              # also run Socket (needs `socket login`)
 seckit scan ~/Git --only=gitleaks,osv   # just these scanners
 seckit scan ~/Git --skip=semgrep        # all except semgrep (the slow one)
+# PowerShell: same switches as parameters
+seckit scan ~/Git -Only gitleaks,osv
+seckit scan ~/Git -Skip semgrep
 ```
 
 Scanner names: `osv`, `gitleaks`, `trufflehog`, `semgrep`, `checkov`, `socket`.
@@ -83,12 +86,16 @@ In the interactive menu, the scan submenu lists the scanners and lets you pick
 which to run.
 
 A "repo" is any folder containing `.git` or `package.json`; `node_modules` is
-skipped. It runs per repo, so a big sweep multiplies - `semgrep` is the
-bottleneck (it fetches rules and does full SAST), so `--skip=semgrep` (or
-`--only=...`) keeps a quick pre-flight fast. Exits non-zero if any repo has
-findings, so it works in CI. `semgrep` uses `--config auto` (no source upload);
-`checkov` runs offline; `socket` is opt-in because it uploads each repo's
-manifest to socket.dev.
+skipped, and a `package.json` folder nested inside a repo (npm/pnpm workspaces,
+monorepos) is scanned as part of that repo rather than again on its own - only
+a nested `.git` makes it a separate repo. It runs per repo, so a big sweep
+multiplies - `semgrep` is the bottleneck (it fetches rules and does full SAST),
+so `--skip=semgrep` (or `--only=...`) keeps a quick pre-flight fast. Exits
+non-zero if any repo has findings, so it works in CI. `semgrep` fetches the
+`p/default` registry ruleset with metrics off (no source upload, no project
+URL sent) and adds the `p/mobsfscan` mobile ruleset (Swift/Kotlin/Java, MASVS)
+when a repo contains native mobile source; `checkov` runs offline; `socket` is
+opt-in because it uploads each repo's manifest to socket.dev.
 
 ## Harden a repo against AI agents
 

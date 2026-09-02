@@ -402,7 +402,20 @@ switch ($Command) {
   'menu' { Invoke-Menu }
   { $_ -in 'install', 'setup' } { Invoke-Install }
   { $_ -in 'doctor', 'check' }  { Invoke-Doctor }
-  'scan'    { & (Join-Path $Here 'scan_repos.ps1') @Rest }
+  'scan'    {
+    # @Rest splats positionally, so re-parse the scan switches by hand;
+    # otherwise `seckit scan DIR -Only a,b` binds '-Only' as a value and
+    # the sweep silently runs zero scanners.
+    $scanArgs = @{}
+    for ($i = 0; $i -lt $Rest.Count; $i++) {
+      $tok = "$($Rest[$i])"
+      if ($tok -eq '-Only' -and $i + 1 -lt $Rest.Count) { $i++; $scanArgs.Only = @($Rest[$i] | ForEach-Object { "$_" -split ',' }) }
+      elseif ($tok -eq '-Skip' -and $i + 1 -lt $Rest.Count) { $i++; $scanArgs.Skip = @($Rest[$i] | ForEach-Object { "$_" -split ',' }) }
+      elseif ($tok -eq '-Socket') { $scanArgs.Socket = $true }
+      else { $scanArgs.Root = $tok }
+    }
+    & (Join-Path $Here 'scan_repos.ps1') @scanArgs
+  }
   'harden'  {
     $repo = if ($Rest.Count -gt 0) { [string]$Rest[0] } else { '.' }
     $yes = $Rest -contains '-Yes' -or $Rest -contains '--yes'

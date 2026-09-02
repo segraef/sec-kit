@@ -24,14 +24,24 @@
 .PARAMETER Socket
   Also run Socket (uploads manifests to socket.dev; needs `socket login`).
 
+.PARAMETER Only
+  Run only these scanners (osv, gitleaks, trufflehog, semgrep, checkov, socket).
+
+.PARAMETER Skip
+  Run all scanners except these.
+
 .EXAMPLE
   ./scan_repos.ps1
   ./scan_repos.ps1 ~/Git -Socket
+  ./scan_repos.ps1 ~/Git -Only gitleaks,osv
+  ./scan_repos.ps1 ~/Git -Skip semgrep
 #>
 [CmdletBinding()]
 param(
   [string]$Root = (Get-Location).Path,
-  [switch]$Socket
+  [switch]$Socket,
+  [string[]]$Only = @(),
+  [string[]]$Skip = @()
 )
 $ErrorActionPreference = 'Continue'
 
@@ -42,15 +52,38 @@ if (-not (Test-Path -PathType Container $Root)) {
 }
 $Root = (Resolve-Path $Root).Path
 
+# semgrep: never send metrics; also read by registry ruleset fetches.
+$env:SEMGREP_SEND_METRICS = 'off'
+
 # ---------- Tool availability ----------------------------------------------
 # Tracked for the end-of-scan report.
-$ScannersAll     = @('osv-scanner','gitleaks','trufflehog','semgrep','checkov','socket')
+# Scanner selection (-Only / -Skip), same keys as the bash script.
+$ScannerKeys = @('osv','gitleaks','trufflehog','semgrep','checkov','socket')
+$OnlyList = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+$SkipList = @($Skip | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+foreach ($t in ($OnlyList + $SkipList)) {
+  if ($t -notin $ScannerKeys) {
+    Write-Host "Unknown scanner '$t' (use: $($ScannerKeys -join ' '))" -ForegroundColor Yellow
+  }
+}
+function BinOf([string]$t) { if ($t -eq 'osv') { 'osv-scanner' } else { $t } }
+function Want([string]$t) {
+  if ($OnlyList.Count) { return ($OnlyList -contains $t) }
+  if ($SkipList -contains $t) { return $false }
+  if ($t -eq 'socket') { return [bool]$Socket }
+  return $true
+}
 $ScannersRun     = @()
 $ScannersSkipped = @()
 $missing = @()
-foreach ($t in $ScannersAll) {
-  if ($t -eq 'socket' -and -not $Socket) { $ScannersSkipped += 'socket (opt-in via -Socket)'; continue }
-  if (-not (Have $t)) { $missing += $t; $ScannersSkipped += "$t (not installed)"; continue }
+foreach ($t in $ScannerKeys) {
+  if (-not (Want $t)) {
+    if ($t -eq 'socket' -and -not $Socket -and -not $OnlyList.Count) { $ScannersSkipped += 'socket (opt-in via -Socket)' }
+    elseif ($SkipList -contains $t) { $ScannersSkipped += "$t (excluded by -Skip)" }
+    continue
+  }
+  $b = BinOf $t
+  if (-not (Have $b)) { $missing += $b; $ScannersSkipped += "$t (not installed: $b)"; continue }
   $ScannersRun += $t
 }
 if ($missing.Count) {
@@ -72,7 +105,23 @@ if (Have gitleaks) {
 $skipDirs = 'node_modules|\.next|dist|build|out|coverage|\.turbo|\.svelte-kit|\.nuxt|\.output|vendor|\.venv|venv|__pycache__'
 $markers = Get-ChildItem -Path $Root -Recurse -Force -Include 'package.json', '.git' -ErrorAction SilentlyContinue |
   Where-Object { $_.FullName -notmatch "[\\/]($skipDirs)[\\/]" }
-$repos = $markers | ForEach-Object { Split-Path $_.FullName -Parent } | Sort-Object -Unique
+$candidates = @($markers | ForEach-Object { Split-Path $_.FullName -Parent } | Sort-Object -Unique)
+
+# Monorepo dedupe: Sort-Object is lexicographic, so a parent repo always
+# precedes its children; drop candidates nested under a kept repo unless they
+# have a .git of their own (vendored/nested repo).
+$repos = @()
+$sep = [System.IO.Path]::DirectorySeparatorChar
+foreach ($d in $candidates) {
+  $keep = $true
+  foreach ($r in $repos) {
+    if ($d.StartsWith("$r$sep")) {
+      if (-not (Test-Path -LiteralPath (Join-Path $d '.git'))) { $keep = $false }
+      break
+    }
+  }
+  if ($keep) { $repos += $d }
+}
 
 if (-not $repos) { Write-Host "No repositories found under $Root"; exit 0 }
 
@@ -90,14 +139,43 @@ New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 # Result rows: PSCustomObjects with Scanner, Repo, ExitCode, Log.
 $Results = New-Object System.Collections.Generic.List[object]
 
+# Some scanners exit non-zero on conditions that are not real findings
+# (e.g. osv-scanner: "No package sources found"). Treat those as clean so
+# the summary line and the report agree (parity with scan_repos.sh).
+function Test-CleanWarning([string]$Key, [string]$Log) {
+  if (-not (Test-Path $Log)) { return $false }
+  $text = Get-Content $Log -Raw -ErrorAction SilentlyContinue
+  if (-not $text) { return $false }
+  switch ($Key) {
+    'osv'      { return [bool]($text -match 'No package sources found') }
+    'gitleaks' { return [bool]($text -match 'no leaks found|leaks found: 0') }
+  }
+  return $false
+}
+
 function Invoke-Scan {
   param([string]$Key, [string]$Repo, [scriptblock]$Cmd)
   $safe = ($Repo -replace '[\\/ .]', '_')
   $log  = Join-Path $LogDir "${Key}__${safe}.log"
-  & $Cmd 2>&1 | Tee-Object -FilePath $log
+  # Out-Host keeps scanner output on screen while keeping it OUT of the
+  # function's return stream - otherwise $rc comes back as an array of
+  # output lines plus the exit code and every noisy scanner reads as red.
+  & $Cmd 2>&1 | Tee-Object -FilePath $log | Out-Host
   $rc = $LASTEXITCODE
+  if ($rc -ne 0 -and (Test-CleanWarning $Key $log)) { $rc = 0 }
   $Results.Add([pscustomobject]@{ Scanner=$Key; Repo=$Repo; ExitCode=$rc; Log=$log })
   return $rc
+}
+
+# Native mobile source (Swift/Kotlin/ObjC, or an Android manifest) outside
+# dependency dirs? If present, semgrep also gets the p/mobsfscan MASVS
+# ruleset. Bare *.java does NOT trigger: backend Java repos would newly fire
+# mobile crypto rules and turn red vs previous releases.
+function Test-MobileSource([string]$Dir) {
+  $found = Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction SilentlyContinue -Include '*.swift','*.kt','*.m','*.mm','AndroidManifest.xml' |
+    Where-Object { $_.FullName -notmatch '[\\/](node_modules|\.git|Pods)[\\/]' } |
+    Select-Object -First 1
+  return [bool]$found
 }
 
 # ---------- Scan loop -------------------------------------------------------
@@ -106,12 +184,12 @@ foreach ($repo in $repos) {
   Write-Host "=== $repo ===" -ForegroundColor White
   $hit = $false
 
-  if (Have osv-scanner) {
+  if ((Want 'osv') -and (Have osv-scanner)) {
     Write-Host "- osv-scanner (vulnerable deps)" -ForegroundColor DarkGray
     $rc = Invoke-Scan -Key 'osv' -Repo $repo -Cmd { & osv-scanner -r $repo }
     if ($rc -ne 0) { $hit = $true }
   }
-  if ($gl) {
+  if ((Want 'gitleaks') -and $gl) {
     Write-Host "- gitleaks (secrets in git history)" -ForegroundColor DarkGray
     if ($gl -eq 'git') {
       $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks git $repo --redact --no-banner }
@@ -120,22 +198,30 @@ foreach ($repo in $repos) {
     }
     if ($rc -ne 0) { $hit = $true }
   }
-  if (Have trufflehog) {
+  if ((Want 'trufflehog') -and (Have trufflehog)) {
     Write-Host "- trufflehog (secrets in files)" -ForegroundColor DarkGray
     $rc = Invoke-Scan -Key 'trufflehog' -Repo $repo -Cmd { & trufflehog filesystem $repo --no-update --fail 2> $null }
     if ($rc -ne 0) { $hit = $true }
   }
-  if (Have semgrep) {
-    Write-Host "- semgrep (code vulns: SQLi, XSS, CSRF)" -ForegroundColor DarkGray
-    $rc = Invoke-Scan -Key 'semgrep' -Repo $repo -Cmd { & semgrep scan --config auto --error --quiet $repo }
+  if ((Want 'semgrep') -and (Have semgrep)) {
+    # p/default instead of auto: auto refuses --metrics=off (and would tie the
+    # scan to the project URL via the registry). Same community default rules.
+    $sgConfigs = @('--config', 'p/default')
+    $sgLabel = 'code vulns: SQLi, XSS, CSRF'
+    if (Test-MobileSource $repo) {
+      $sgConfigs += @('--config', 'p/mobsfscan')
+      $sgLabel = 'code vulns + mobile (MASVS)'
+    }
+    Write-Host "- semgrep ($sgLabel)" -ForegroundColor DarkGray
+    $rc = Invoke-Scan -Key 'semgrep' -Repo $repo -Cmd { & semgrep scan @sgConfigs --metrics=off --error --quiet $repo }
     if ($rc -ne 0) { $hit = $true }
   }
-  if (Have checkov) {
+  if ((Want 'checkov') -and (Have checkov)) {
     Write-Host "- checkov (IaC misconfig)" -ForegroundColor DarkGray
     $rc = Invoke-Scan -Key 'checkov' -Repo $repo -Cmd { & checkov -d $repo --quiet --compact --skip-path node_modules }
     if ($rc -ne 0) { $hit = $true }
   }
-  if ($Socket -and (Have socket)) {
+  if ((Want 'socket') -and (Have socket)) {
     Write-Host "- socket (malicious packages)" -ForegroundColor DarkGray
     $rc = Invoke-Scan -Key 'socket' -Repo $repo -Cmd { & socket scan create $repo }
     if ($rc -ne 0) { $hit = $true }
