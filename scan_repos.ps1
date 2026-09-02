@@ -30,18 +30,30 @@
 .PARAMETER Skip
   Run all scanners except these.
 
+.PARAMETER FailOn
+  Findings that fail the run: any (default) or high. With high, secrets
+  (gitleaks, trufflehog) always fail; osv fails only on Critical/High (a
+  missing severity summary counts as fail); semgrep runs with --severity
+  ERROR; checkov and socket become report-only.
+
+.PARAMETER Strict
+  Exit 3 if a selected scanner is not installed (default: skip it).
+
 .EXAMPLE
   ./scan_repos.ps1
   ./scan_repos.ps1 ~/Git -Socket
   ./scan_repos.ps1 ~/Git -Only gitleaks,osv
   ./scan_repos.ps1 ~/Git -Skip semgrep
+  ./scan_repos.ps1 ~/Git -FailOn high -Strict
 #>
 [CmdletBinding()]
 param(
   [string]$Root = (Get-Location).Path,
   [switch]$Socket,
   [string[]]$Only = @(),
-  [string[]]$Skip = @()
+  [string[]]$Skip = @(),
+  [string]$FailOn = 'any',
+  [switch]$Strict
 )
 $ErrorActionPreference = 'Continue'
 
@@ -49,6 +61,9 @@ function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
 if (-not (Test-Path -PathType Container $Root)) {
   Write-Error "Not a directory: $Root"; exit 2
+}
+if ($FailOn -notin @('any', 'high')) {
+  Write-Error "Invalid -FailOn '$FailOn' (use: any high)"; exit 2
 }
 $Root = (Resolve-Path $Root).Path
 
@@ -90,6 +105,10 @@ if ($missing.Count) {
   Write-Host "Missing tools (skipped): $($missing -join ', ')" -ForegroundColor Yellow
   Write-Host "Install: brew install $($missing -join ' ')  (or scoop install ... on Windows)" -ForegroundColor DarkGray
   Write-Host ""
+}
+if ($Strict -and $missing.Count) {
+  Write-Host "-Strict: selected scanner(s) not installed: $($missing -join ', ')" -ForegroundColor Red
+  exit 3
 }
 
 # gitleaks renamed `detect` -> `git` in v8.19+; probe which this build has.
@@ -153,6 +172,21 @@ function Test-CleanWarning([string]$Key, [string]$Log) {
   return $false
 }
 
+# -FailOn high: is this non-zero scanner exit below the failure threshold?
+# Mirrors seckit_below_threshold in scan_repos.sh.
+function Test-BelowThreshold([string]$Key, [string]$Log) {
+  if ($FailOn -ne 'high') { return $false }
+  if ($Key -in @('checkov', 'socket')) { return $true }
+  if ($Key -ne 'osv') { return $false }
+  $text = Get-Content -LiteralPath $Log -Raw -ErrorAction SilentlyContinue
+  $m = [regex]::Match("$text", '\(([0-9]+) Critical, ([0-9]+) High,')
+  if (-not $m.Success) {
+    Write-Host '  osv: no severity summary; -FailOn high treats this as a failure' -ForegroundColor Yellow
+    return $false
+  }
+  return (([int]$m.Groups[1].Value + [int]$m.Groups[2].Value) -eq 0)
+}
+
 function Invoke-Scan {
   param([string]$Key, [string]$Repo, [scriptblock]$Cmd)
   $safe = ($Repo -replace '[\\/ .]', '_')
@@ -164,6 +198,9 @@ function Invoke-Scan {
   $rc = $LASTEXITCODE
   if ($rc -ne 0 -and (Test-CleanWarning $Key $log)) { $rc = 0 }
   $Results.Add([pscustomobject]@{ Scanner=$Key; Repo=$Repo; ExitCode=$rc; Log=$log })
+  # Below-threshold findings stay visible in the report (raw ExitCode above)
+  # but do not fail the run.
+  if ($rc -ne 0 -and (Test-BelowThreshold $Key $log)) { return 0 }
   return $rc
 }
 
@@ -207,6 +244,7 @@ foreach ($repo in $repos) {
     # p/default instead of auto: auto refuses --metrics=off (and would tie the
     # scan to the project URL via the registry). Same community default rules.
     $sgConfigs = @('--config', 'p/default')
+    if ($FailOn -eq 'high') { $sgConfigs += @('--severity', 'ERROR') }
     $sgLabel = 'code vulns: SQLi, XSS, CSRF'
     if (Test-MobileSource $repo) {
       $sgConfigs += @('--config', 'p/mobsfscan')

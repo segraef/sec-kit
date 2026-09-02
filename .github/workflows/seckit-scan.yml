@@ -52,6 +52,8 @@ jobs:
         continue-on-error: true
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          # Blocking-gate variant: add --fail-on=high --strict here and flip
+          # the Gate step below to exit 1.
           bash "$RUNNER_TEMP/sec-kit/seckit.sh" scan "$GITHUB_WORKSPACE" --skip=socket
 
       - name: Publish report
