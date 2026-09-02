@@ -44,6 +44,8 @@ steps:
 
   - bash: |
       eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+      # Blocking-gate variant: add --fail-on=high --strict here and remove
+      # continueOnError from this step.
       bash "$(Agent.TempDirectory)/sec-kit/seckit.sh" scan "$(Build.SourcesDirectory)" --skip=socket
     displayName: Scan (seckit scan)
     continueOnError: true

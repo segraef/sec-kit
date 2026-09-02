@@ -411,6 +411,8 @@ switch ($Command) {
       $tok = "$($Rest[$i])"
       if ($tok -eq '-Only' -and $i + 1 -lt $Rest.Count) { $i++; $scanArgs.Only = @($Rest[$i] | ForEach-Object { "$_" -split ',' }) }
       elseif ($tok -eq '-Skip' -and $i + 1 -lt $Rest.Count) { $i++; $scanArgs.Skip = @($Rest[$i] | ForEach-Object { "$_" -split ',' }) }
+      elseif ($tok -eq '-FailOn' -and $i + 1 -lt $Rest.Count) { $i++; $scanArgs.FailOn = "$($Rest[$i])" }
+      elseif ($tok -eq '-Strict') { $scanArgs.Strict = $true }
       elseif ($tok -eq '-Socket') { $scanArgs.Socket = $true }
       else { $scanArgs.Root = $tok }
     }

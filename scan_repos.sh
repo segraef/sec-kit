@@ -10,11 +10,20 @@
 #   --socket     also run Socket (uploads manifests to socket.dev; needs login)
 #   --only=LIST  run only these scanners (comma-separated)
 #   --skip=LIST  run all scanners except these
+#   --fail-on=T  findings that fail the run: any (default) | high
+#   --strict     exit 3 if a selected scanner is not installed (default: skip)
 #   names:       osv, gitleaks, trufflehog, semgrep, checkov, socket
 #
 # Monorepos: a package.json dir nested inside a discovered repo is scanned as
 # part of that repo (scanners recurse from the root); only a nested .git makes
 # it a separate repo.
+#
+# Exit codes: 0 clean, 1 findings at/above --fail-on, 2 usage error,
+# 3 --strict and a selected scanner is missing.
+#
+# --fail-on=high: secrets (gitleaks, trufflehog) always fail; osv fails only
+# when Critical+High > 0 (no severity summary counts as fail); semgrep runs
+# with --severity ERROR; checkov and socket become report-only.
 #
 # Scanners (each is skipped automatically if not installed):
 #   osv          known-vulnerable dependencies (CVEs)
@@ -35,17 +44,22 @@ ROOT="$PWD"
 RUN_SOCKET=0
 ONLY=""
 SKIP=""
+FAIL_ON="any"
+STRICT=0
 for arg in "$@"; do
   case "$arg" in
     --socket)  RUN_SOCKET=1 ;;
     --only=*)  ONLY="${arg#*=}" ;;
     --skip=*)  SKIP="${arg#*=}" ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --fail-on=*) FAIL_ON="${arg#*=}" ;;
+    --strict)  STRICT=1 ;;
+    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     --*)       echo "Unknown flag: $arg" >&2; exit 2 ;;
     *)         ROOT="$arg" ;;
   esac
 done
 [[ -d "$ROOT" ]] || { echo "Not a directory: $ROOT" >&2; exit 2; }
+case "$FAIL_ON" in any|high) ;; *) echo "Invalid --fail-on '$FAIL_ON' (use: any high)" >&2; exit 2 ;; esac
 ROOT="$(cd "$ROOT" && pwd)"
 
 # semgrep: never send metrics; also read by registry ruleset fetches.
@@ -107,6 +121,10 @@ if (( ${#missing[@]} )); then
   echo "${YEL}Missing tools (skipped): ${missing[*]}${RST}"
   echo "${DIM}Install with: seckit install${RST}"
   echo
+fi
+if (( STRICT )) && (( ${#missing[@]} )); then
+  echo "${RED}--strict: selected scanner(s) not installed: ${missing[*]}${RST}" >&2
+  exit 3
 fi
 
 # gitleaks renamed `detect` -> `git` in v8.19+; probe which this build has.
@@ -209,13 +227,37 @@ seckit_is_clean_warning() {
   return 1
 }
 
-# Wrap run_scan to also reflect the clean-warning filter in $hit.
+# --fail-on=high: is this non-zero scanner exit below the failure threshold?
+# Secrets always fail; osv fails only on Critical/High (a missing severity
+# summary counts as fail); semgrep already ran with --severity ERROR; checkov
+# and socket are report-only under high. Returns 0 = below threshold (pass).
+seckit_below_threshold() {
+  local key="$1" log="$2" sev crit high
+  [[ "$FAIL_ON" == high ]] || return 1
+  case "$key" in
+    checkov|socket) return 0 ;;
+    osv)
+      sev="$(grep -oE '\([0-9]+ Critical, [0-9]+ High,' "$log" 2>/dev/null | head -1)"
+      if [[ -z "$sev" ]]; then
+        echo "  ${YEL}osv: no severity summary; --fail-on=high treats this as a failure${RST}" >&2
+        return 1
+      fi
+      crit="$(printf '%s' "$sev" | awk '{print $1}' | tr -d '(')"
+      high="$(printf '%s' "$sev" | awk '{print $3}')"
+      (( crit + high == 0 )) && return 0
+      return 1 ;;
+  esac
+  return 1
+}
+
+# Wrap run_scan to also reflect the clean-warning and threshold filters in $hit.
 _seckit_run_and_count() {
   local key="$1" repo="$2"; shift 2
   if ! run_scan "$key" "$repo" "$@"; then
     local last="${RESULTS[$((${#RESULTS[@]} - 1))]}"
     local lg="${last##*|}"
     seckit_is_clean_warning "$key" "$lg" && return 0
+    seckit_below_threshold "$key" "$lg" && return 0
     return 1
   fi
   return 0
@@ -250,6 +292,7 @@ for repo in "${repos[@]}"; do
     # p/default instead of auto: auto refuses --metrics=off (and would tie the
     # scan to the project URL via the registry). Same community default rules.
     sg_args=(--config p/default)
+    [[ "$FAIL_ON" == high ]] && sg_args+=(--severity ERROR)
     sg_label="code vulns: SQLi, XSS, CSRF"
     if _seckit_has_mobile_src "$repo"; then
       sg_args+=(--config p/mobsfscan)

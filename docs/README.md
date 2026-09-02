@@ -79,6 +79,7 @@ seckit scan ~/Git --skip=semgrep        # all except semgrep (the slow one)
 # PowerShell: same switches as parameters
 seckit scan ~/Git -Only gitleaks,osv
 seckit scan ~/Git -Skip semgrep
+seckit scan ~/Git --fail-on=high --strict  # gate mode (pwsh: -FailOn high -Strict)
 ```
 
 Scanner names: `osv`, `gitleaks`, `trufflehog`, `semgrep`, `checkov`, `socket`.
@@ -96,6 +97,16 @@ non-zero if any repo has findings, so it works in CI. `semgrep` fetches the
 URL sent) and adds the `p/mobsfscan` mobile ruleset (Swift/Kotlin/Java, MASVS)
 when a repo contains native mobile source; `checkov` runs offline; `socket` is
 opt-in because it uploads each repo's manifest to socket.dev.
+
+Exit codes: `0` clean, `1` findings at or above the `--fail-on` threshold,
+`2` usage error, `3` `--strict` with a selected scanner not installed.
+`--fail-on=high` keeps a blocking gate quiet on low-severity noise: secrets
+(gitleaks, trufflehog) always fail; osv fails only when Critical or High
+vulnerabilities are present (a missing severity summary counts as fail);
+semgrep runs with `--severity ERROR`; checkov and socket still report but
+never fail the run. The default `--fail-on=any` fails on any finding, as
+before. `--strict` is for gates that must not silently pass because a scanner
+was missing on the machine.
 
 ## Harden a repo against AI agents
 
