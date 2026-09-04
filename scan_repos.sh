@@ -198,7 +198,29 @@ run_scan() {
 
 # trufflehog: keep findings (stdout) but drop noisy progress (stderr).
 _seckit_trufflehog() {
-  trufflehog filesystem "$1" --no-update --fail 2>/dev/null
+  local x=() err rc
+  [[ -f "$1/.trufflehog-exclude" ]] && x=(-x "$1/.trufflehog-exclude")
+  err="${TMPDIR:-/tmp}/seckit-th-$$.err"
+  trufflehog filesystem "$1" --no-update --fail ${x[@]+"${x[@]}"} 2>"$err"
+  rc=$?
+  # --fail exits 183 on findings; any other non-zero is a tool error (e.g. a
+  # bad regex in .trufflehog-exclude) - surface it instead of a silent red.
+  if (( rc != 0 && rc != 183 )); then
+    echo "trufflehog error (exit $rc):"; tail -n 3 "$err"
+  fi
+  rm -f "$err"
+  return $rc
+}
+
+# osv logs "Scanned <path> file and found N packages" - lift those lines into
+# a Coverage line so the scan says what was actually parsed, not just what it
+# found. Paths are shown relative to the repo.
+seckit_coverage() {
+  local repo="$1" log="$2"
+  [[ -f "$log" ]] || return 0
+  grep -oE 'Scanned .* file and found [0-9]+ packages?' "$log" 2>/dev/null \
+    | sed -e "s|Scanned $repo/|Scanned |" \
+    | awk 'NR>1{printf "; "} {printf "%s", $0} END{if(NR)print ""}'
 }
 
 # Native mobile source (Swift/Kotlin/ObjC, or an Android manifest) outside
@@ -272,14 +294,20 @@ for repo in "${repos[@]}"; do
   if want osv && have osv-scanner; then
     echo "${DIM}- osv-scanner (vulnerable deps)${RST}"
     _seckit_run_and_count osv "$repo" osv-scanner -r "$repo" || hit=1
+    last="${RESULTS[$((${#RESULTS[@]} - 1))]}"
+    cov="$(seckit_coverage "$repo" "${last##*|}")"
+    [[ -z "$cov" ]] && cov="no package manifests parsed"
+    echo "  ${DIM}coverage: ${cov}${RST}"
   fi
 
   if want gitleaks && [[ -n "$GL" ]]; then
     echo "${DIM}- gitleaks (secrets in git history)${RST}"
     if [[ "$GL" == "git" ]]; then
-      _seckit_run_and_count gitleaks "$repo" gitleaks git "$repo" --redact --no-banner || hit=1
+      # --gitleaks-ignore-path: read .gitleaksignore from the scanned repo,
+      # not from whatever directory seckit happens to be invoked from.
+      _seckit_run_and_count gitleaks "$repo" gitleaks git "$repo" --redact --no-banner --gitleaks-ignore-path "$repo" || hit=1
     else
-      _seckit_run_and_count gitleaks "$repo" gitleaks detect --source "$repo" --redact --no-banner || hit=1
+      _seckit_run_and_count gitleaks "$repo" gitleaks detect --source "$repo" --redact --no-banner --gitleaks-ignore-path "$repo" || hit=1
     fi
   fi
 
@@ -304,7 +332,11 @@ for repo in "${repos[@]}"; do
 
   if want checkov && have checkov; then
     echo "${DIM}- checkov (IaC misconfig)${RST}"
-    _seckit_run_and_count checkov "$repo" checkov -d "$repo" --quiet --compact --skip-path node_modules || hit=1
+    # Accepted findings live in checkov's own baseline format; create with
+    # `checkov -d . --create-baseline`. Passed only when the file exists.
+    ck_args=(-d "$repo" --quiet --compact --skip-path node_modules)
+    [[ -f "$repo/.checkov.baseline" ]] && ck_args+=(--baseline "$repo/.checkov.baseline")
+    _seckit_run_and_count checkov "$repo" checkov "${ck_args[@]}" || hit=1
   fi
 
   if want socket && have socket; then
@@ -450,6 +482,9 @@ PROMPT_HEAD
       sev="$(seckit_osv_severity "$lg")"
       rel="${r#"$ROOT"/}"; [[ "$rel" == "$r" ]] && rel='.'
       [[ -n "$sev" ]] && printf '**osv severity (`%s`):** %s\n\n' "$rel" "$sev"
+      cov="$(seckit_coverage "$r" "$lg")"
+      [[ -z "$cov" ]] && cov="no package manifests parsed"
+      printf '**Coverage (`%s`):** %s\n\n' "$rel" "$cov"
     done
   fi
 

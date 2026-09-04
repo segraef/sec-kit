@@ -172,6 +172,17 @@ function Test-CleanWarning([string]$Key, [string]$Log) {
   return $false
 }
 
+# osv logs "Scanned <path> file and found N packages" - lift those lines into
+# a Coverage line so the scan says what was actually parsed. Paths relative
+# to the repo.
+function Get-Coverage([string]$Repo, [string]$Log) {
+  if (-not (Test-Path -LiteralPath $Log)) { return '' }
+  $text = Get-Content -LiteralPath $Log -Raw -ErrorAction SilentlyContinue
+  $found = [regex]::Matches("$text", 'Scanned [^\r\n]+ file and found [0-9]+ packages?') |
+    ForEach-Object { $_.Value.Replace("Scanned $Repo/", 'Scanned ').Replace("Scanned $Repo\", 'Scanned ') }
+  return (@($found) -join '; ')
+}
+
 # -FailOn high: is this non-zero scanner exit below the failure threshold?
 # Mirrors seckit_below_threshold in scan_repos.sh.
 function Test-BelowThreshold([string]$Key, [string]$Log) {
@@ -224,20 +235,36 @@ foreach ($repo in $repos) {
   if ((Want 'osv') -and (Have osv-scanner)) {
     Write-Host "- osv-scanner (vulnerable deps)" -ForegroundColor DarkGray
     $rc = Invoke-Scan -Key 'osv' -Repo $repo -Cmd { & osv-scanner -r $repo }
+    $cov = Get-Coverage -Repo $repo -Log $Results[$Results.Count - 1].Log
+    if (-not $cov) { $cov = 'no package manifests parsed' }
+    Write-Host "  coverage: $cov" -ForegroundColor DarkGray
     if ($rc -ne 0) { $hit = $true }
   }
   if ((Want 'gitleaks') -and $gl) {
     Write-Host "- gitleaks (secrets in git history)" -ForegroundColor DarkGray
     if ($gl -eq 'git') {
-      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks git $repo --redact --no-banner }
+      # --gitleaks-ignore-path: read .gitleaksignore from the scanned repo,
+      # not from whatever directory seckit happens to be invoked from.
+      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks git $repo --redact --no-banner --gitleaks-ignore-path $repo }
     } else {
-      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks detect --source $repo --redact --no-banner }
+      $rc = Invoke-Scan -Key 'gitleaks' -Repo $repo -Cmd { & gitleaks detect --source $repo --redact --no-banner --gitleaks-ignore-path $repo }
     }
     if ($rc -ne 0) { $hit = $true }
   }
   if ((Want 'trufflehog') -and (Have trufflehog)) {
     Write-Host "- trufflehog (secrets in files)" -ForegroundColor DarkGray
-    $rc = Invoke-Scan -Key 'trufflehog' -Repo $repo -Cmd { & trufflehog filesystem $repo --no-update --fail 2> $null }
+    $thArgs = @()
+    if (Test-Path -LiteralPath (Join-Path $repo '.trufflehog-exclude')) { $thArgs = @('-x', (Join-Path $repo '.trufflehog-exclude')) }
+    $rc = Invoke-Scan -Key 'trufflehog' -Repo $repo -Cmd {
+      $thErr = Join-Path $LogDir 'trufflehog.stderr'
+      & trufflehog filesystem $repo --no-update --fail @thArgs 2> $thErr
+      # --fail exits 183 on findings; any other non-zero is a tool error
+      # (e.g. a bad regex in .trufflehog-exclude) - surface the reason.
+      if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 183) {
+        "trufflehog error (exit $LASTEXITCODE):"
+        Get-Content -LiteralPath $thErr -Tail 3 -ErrorAction SilentlyContinue
+      }
+    }
     if ($rc -ne 0) { $hit = $true }
   }
   if ((Want 'semgrep') -and (Have semgrep)) {
@@ -256,7 +283,11 @@ foreach ($repo in $repos) {
   }
   if ((Want 'checkov') -and (Have checkov)) {
     Write-Host "- checkov (IaC misconfig)" -ForegroundColor DarkGray
-    $rc = Invoke-Scan -Key 'checkov' -Repo $repo -Cmd { & checkov -d $repo --quiet --compact --skip-path node_modules }
+    # Accepted findings live in checkov's own baseline format; create with
+    # `checkov -d . --create-baseline`. Passed only when the file exists.
+    $ckArgs = @('-d', $repo, '--quiet', '--compact', '--skip-path', 'node_modules')
+    if (Test-Path -LiteralPath (Join-Path $repo '.checkov.baseline')) { $ckArgs += @('--baseline', (Join-Path $repo '.checkov.baseline')) }
+    $rc = Invoke-Scan -Key 'checkov' -Repo $repo -Cmd { & checkov @ckArgs }
     if ($rc -ne 0) { $hit = $true }
   }
   if ((Want 'socket') -and (Have socket)) {
@@ -398,12 +429,16 @@ if ($ranKeys.Count -and $repos.Count) {
   [void]$md.AppendLine('_`-` = scanner did not apply to that repo, `0` = clean, counts are approximate._')
   [void]$md.AppendLine()
   foreach ($row in ($Results | Where-Object { $_.Scanner -eq 'osv' })) {
+    $rel = if ($row.Repo -eq $Root) { '.' } else { $row.Repo.Substring($Root.Length).TrimStart('\','/') }
     $sev = Get-OsvSeverity -Log $row.Log
     if ($sev) {
-      $rel = if ($row.Repo -eq $Root) { '.' } else { $row.Repo.Substring($Root.Length).TrimStart('\','/') }
       [void]$md.AppendLine("**osv severity (``$rel``):** $sev")
       [void]$md.AppendLine()
     }
+    $cov = Get-Coverage -Repo $row.Repo -Log $row.Log
+    if (-not $cov) { $cov = 'no package manifests parsed' }
+    [void]$md.AppendLine("**Coverage (``$rel``):** $cov")
+    [void]$md.AppendLine()
   }
 }
 
