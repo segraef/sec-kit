@@ -10,6 +10,18 @@ From v0.1.0 onward this file is generated automatically by
 [Conventional Commits](https://www.conventionalcommits.org/). Do not edit
 released sections by hand; write a good commit message instead.
 
+## [0.1.4](https://github.com/segraef/sec-kit/compare/v0.1.3...v0.1.4) (2026-09-05)
+
+
+### Added
+
+* monorepo-aware scan, ps1 flag parity, semgrep privacy + mobile rules ([c1664c2](https://github.com/segraef/sec-kit/commit/c1664c26e412bbb69559f425478635fbaa16bc50))
+* monorepo-aware scan, ps1 flag parity, semgrep privacy + mobile rules ([9d0af1b](https://github.com/segraef/sec-kit/commit/9d0af1b16c72ba3ed3f5c61635ed4fecfac0cf9a))
+* native baseline files, Coverage report line, scanner-error diagnostics ([1865517](https://github.com/segraef/sec-kit/commit/1865517d179ac2e98a261ab62ad5235daf038844))
+* native baseline files, Coverage report line, scanner-error diagnostics ([65b5428](https://github.com/segraef/sec-kit/commit/65b542864a8690d86623eb82881ed867572a94b0))
+* scan gate mode via --fail-on=any|high and --strict ([6c94280](https://github.com/segraef/sec-kit/commit/6c94280331b44f25927b1ba3938606d85210aa84))
+* scan gate mode via --fail-on=any|high and --strict ([8b6c62d](https://github.com/segraef/sec-kit/commit/8b6c62d53a38d32271c88e610579c6b06e7de51b))
+
 ## [0.1.3](https://github.com/segraef/sec-kit/compare/v0.1.2...v0.1.3) (2026-08-26)
 
 
