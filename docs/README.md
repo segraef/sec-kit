@@ -108,6 +108,48 @@ never fail the run. The default `--fail-on=any` fails on any finding, as
 before. `--strict` is for gates that must not silently pass because a scanner
 was missing on the machine.
 
+### What the scanners cover
+
+| Surface | Scanner |
+|---|---|
+| npm / yarn / pnpm / bun lockfiles | osv |
+| Maven / Gradle (`pom.xml`, `gradle.lockfile`) | osv |
+| Python / Ruby / Go / Rust / PHP / Dart / .NET lockfiles | osv |
+| Secrets in git history | gitleaks |
+| Secrets in working files | trufflehog |
+| JS/TS source (SAST) | semgrep `p/default` |
+| Swift / Kotlin / Java mobile source | semgrep `p/mobsfscan` (auto, on native mobile source) |
+| Bicep, Terraform, GitHub Actions, Docker, K8s | checkov |
+| Malicious package behaviour | socket (opt-in) |
+
+Not covered - know your blind spots: CocoaPods advisories (OSV has no
+CocoaPods ecosystem, so `Podfile.lock` yields nothing), compiled IPA/APK/AAB
+binaries, Expo `app.json`/`eas.json` and Info.plist/AndroidManifest
+semantics, and a bare `package.json` with no lockfile. Expo-managed repos
+with no `ios/`/`android/` dir are fine: their native layer is the npm
+packages, which are covered. Each repo's report includes a `Coverage:` line
+listing exactly which manifest files osv parsed (or "no package manifests
+parsed", so silence never masquerades as coverage).
+
+### Baselines (accepted findings)
+
+Accepted findings live in each tool's native file at the repo root - no
+SecKit-specific format, so reasons and expiry are reviewed in the PR that
+edits the file: `.gitleaks.toml` / `.gitleaksignore`, `osv-scanner.toml`
+(`[[IgnoredVulns]]` with `reason` and `ignoreUntil`), `.semgrepignore` /
+`# nosemgrep`, `.checkov.baseline` (create with `checkov -d .
+--create-baseline`), `.trufflehog-exclude` (one path regex per line). The
+checkov and trufflehog files are passed automatically when present;
+gitleaks reads its ignore files from the scanned repo.
+
+Two placement/scope caveats, both verified against the shipped tools:
+`osv-scanner.toml` must sit **beside each manifest** it applies to (osv only
+loads the config next to the lockfile being scanned - a root-level file does
+nothing for a nested `apps/*/package-lock.json`). And checkov baselines match
+on **resource name + check id only, across files**: a same-named resource in
+a new file silently inherits the suppression, so review `.checkov.baseline`
+diffs with care.
+
 ## Harden a repo against AI agents
 
 `seckit harden` stops **Claude Code and GitHub Copilot** pulling secrets into
