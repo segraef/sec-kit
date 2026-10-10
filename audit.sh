@@ -94,6 +94,12 @@ audit_github_repo() {
   if [[ "$va_status" == "204" ]]; then record required "security.vulnerability_alerts" "enabled" "enabled" pass
   else                                record required "security.vulnerability_alerts" "enabled" "disabled" fail; fi
 
+  # Dependabot security updates (automatic fix PRs): {"enabled":bool,"paused":bool}.
+  local asf asf_state
+  asf="$(gh api "repos/$owner/$repo/automated-security-fixes" 2>/dev/null)" || asf='{}'
+  asf_state="$(jq -r 'if .enabled == true then (if .paused == true then "paused" else "enabled" end) elif .enabled == false then "disabled" else "unknown" end' <<< "$asf")"
+  match "$asf_state" "enabled" && record required "security.dependabot_security_updates" "enabled" "$asf_state" pass || record required "security.dependabot_security_updates" "enabled" "$asf_state" fail
+
   sec_state="$(jq -r '.security_and_analysis.secret_scanning.status // "unknown"' <<< "$repo_json")"
   push_state="$(jq -r '.security_and_analysis.secret_scanning_push_protection.status // "unknown"' <<< "$repo_json")"
   cs_state="$(jq -r '.security_and_analysis.code_scanning_default_setup.status // "unknown"' <<< "$repo_json" 2>/dev/null || echo unknown)"
