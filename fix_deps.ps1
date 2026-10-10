@@ -102,7 +102,7 @@ try {
     $work = $dir
     if ($DryRun) {
       $pkg = Get-Content (Join-Path $dir 'package.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json -AsHashtable -ErrorAction SilentlyContinue
-      if ($pkg -and $pkg.workspaces) { Write-Host '  -DryRun does not support npm workspaces yet; skipped' -ForegroundColor Yellow; continue }
+      if ($pkg -and $pkg.workspaces) { Write-Host '  -DryRun does not support npm workspaces yet; skipped' -ForegroundColor Yellow; $left += Get-CritHigh $before; continue }
       $work = Join-Path $tmp "work$i"
       New-Item -ItemType Directory -Force -Path $work | Out-Null
       Copy-Item (Join-Path $dir 'package.json'), $lock.FullName -Destination $work

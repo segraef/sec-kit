@@ -77,13 +77,21 @@ have npm || { echo "${RED}npm is required to fix npm dependencies (install Node.
 # npm audit JSON for the lockfile in $1 (no install, no scripts).
 audit_json() { (cd "$1" && npm audit --json --package-lock-only 2>/dev/null) || true; }
 
-# "C critical, H high, M moderate, L low" from audit JSON on stdin.
+# "C critical, H high, M moderate, L low" from audit JSON on stdin. npm audit
+# prints {"error":...} (exit 0) when the registry is unreachable: that is
+# "unknown", never "0 critical", so a failed audit cannot read as clean.
 counts() {
-  jq -r '.metadata.vulnerabilities // {} |
-    "\(.critical // 0) critical, \(.high // 0) high, \(.moderate // 0) moderate, \(.low // 0) low"' 2>/dev/null \
-    || echo "unknown (npm audit failed)"
+  local out
+  out="$(jq -r '.metadata.vulnerabilities | objects |
+    "\(.critical // 0) critical, \(.high // 0) high, \(.moderate // 0) moderate, \(.low // 0) low"' 2>/dev/null)"
+  echo "${out:-unknown (npm audit failed)}"
 }
-crit_high() { jq -r '.metadata.vulnerabilities // {} | (.critical // 0) + (.high // 0)' 2>/dev/null || echo 1; }
+# critical + high; 1 when the audit failed (fail closed).
+crit_high() {
+  local n
+  n="$(jq -r '.metadata.vulnerabilities | objects | (.critical // 0) + (.high // 0)' 2>/dev/null)"
+  [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 1
+}
 
 # What still needs a human: name, current version, severity, and the fix npm knows.
 remaining() {  # $1 = audit json file, $2 = lockfile
@@ -132,6 +140,7 @@ for lock in "${LOCKS[@]}"; do
   if (( DRY )); then
     if jq -e '.workspaces' "$dir/package.json" >/dev/null 2>&1; then
       echo "  ${YEL}--dry-run does not support npm workspaces yet; skipped${RST}"
+      LEFT=$((LEFT + $(crit_high < "$TMP/before.json")))
       continue
     fi
     work="$TMP/work$i"; mkdir -p "$work"
