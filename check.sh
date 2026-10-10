@@ -14,7 +14,7 @@ set -uo pipefail
 cd "$(dirname "$0")" || exit 2
 
 # Keep this list in sync with the shellcheck step in ci.yml.
-SH_FILES=(banner.sh seckit.sh scan_repos.sh scan_skill.sh check.sh)
+SH_FILES=(banner.sh seckit.sh scan_repos.sh scan_skill.sh fix_deps.sh check.sh)
 
 fail=0
 note() { printf '\n== %s ==\n' "$1"; }
