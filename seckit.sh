@@ -6,6 +6,7 @@
 #   seckit install      install any missing scanners + clients (brew/npm/pipx)
 #   seckit doctor       check that scanners + clients are installed
 #   seckit scan [DIR]   sweep local repos for vulns, malicious packages, secrets
+#   seckit fix [DIR]    apply safe (same-major) npm vulnerability fixes, lockfile-only
 #   seckit bug          report an error or unexpected behaviour on GitHub
 #   seckit scan-skill <t> vet an AI skill / MCP server before you install it
 #   seckit harden [DIR] drop AI-agent guardrails + PR/CODEOWNERS into a repo
@@ -345,6 +346,7 @@ ${BOLD}COMMANDS${RST}
   ${BOLD}install${RST}               install missing scanners + clients (brew/npm/pipx)
   ${BOLD}doctor${RST}                check that all scanners + clients are installed
   ${BOLD}scan${RST} [DIR]            sweep repos for vulns, malicious packages, secrets
+  ${BOLD}fix${RST} [DIR]             apply safe (same-major) npm fixes (--dry-run, --install)
   ${BOLD}scan-skill${RST} <target>   vet an AI skill / MCP server before installing
   ${BOLD}harden${RST} [DIR]          drop AI-agent guardrails + PR/CODEOWNERS into a repo
   ${BOLD}agent${RST} <sub>           install the SecKit agent prompt (claude|copilot|cursor)
@@ -361,6 +363,7 @@ ${BOLD}COMMANDS${RST}
 ${BOLD}EXAMPLES${RST}
   seckit doctor                     check tool health
   seckit scan .                     scan the current directory
+  seckit fix . --dry-run            preview safe dependency fixes
   seckit scan-skill @some/mcp       vet an MCP server
   seckit harden .                   harden the current repo
   seckit update                     update to the latest version
@@ -430,6 +433,7 @@ cmd_menu() {
     echo "  ${GRN}2${RST}) install     ${DIM}install any missing scanners + clients${RST}"
     echo "  ${GRN}3${RST}) scan        ${DIM}sweep local repos for vulns, malware, secrets${RST}"
     echo "  ${GRN}s${RST}) scan-skill  ${DIM}vet an AI skill / MCP server before installing${RST}"
+    echo "  ${GRN}f${RST}) fix         ${DIM}apply safe (same-major) npm vulnerability fixes${RST}"
     echo "  ${GRN}4${RST}) harden      ${DIM}AI guardrails + PR/CODEOWNERS + dependabot${RST}"
     echo "  ${GRN}5${RST}) agent       ${DIM}install the SecKit agent for Claude/Copilot/Cursor${RST}"
     echo "  ${GRN}6${RST}) mcp         ${DIM}install MCP servers (security + enterprise packs)${RST}"
@@ -476,6 +480,13 @@ cmd_menu() {
         ;;
       4|harden)     cmd_harden ;;
       5|agent)      cmd_agent install ;;
+      f|fix)
+        printf 'Directory to fix [%s.%s] (b to back): ' "$DIM" "$RST"; read -r dir
+        [[ "$dir" == b || "$dir" == back ]] && continue
+        dir="${dir:-.}"; dir="${dir/#\~/$HOME}"
+        printf 'Dry run first? [%sY%s/n]: ' "$BOLD" "$RST"; read -r fy
+        if [[ "$fy" == n || "$fy" == N ]]; then bash "$HERE/fix_deps.sh" "$dir"
+        else bash "$HERE/fix_deps.sh" "$dir" --dry-run; fi ;;
       6|mcp)
         echo "${BOLD}MCP${RST} - pick an action"
         echo "  ${GRN}1${RST}) list      ${DIM}show every server, grouped by pack${RST}"
@@ -883,6 +894,7 @@ case "$cmd" in
   install|setup)    cmd_install "$@" ;;
   scan)             exec bash "$HERE/scan_repos.sh" "$@" ;;
   scan-skill|skill) exec bash "$HERE/scan_skill.sh" "$@" ;;
+  fix)              exec bash "$HERE/fix_deps.sh" "$@" ;;
   harden|guard|init) cmd_harden "$@" ;;
   agent)            cmd_agent "$@" ;;
   mcp)              exec bash "$HERE/mcp.sh" "$@" ;;

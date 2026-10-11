@@ -3,7 +3,7 @@
 .SYNOPSIS
   seckit - a small, portable security kit you carry between machines.
 .DESCRIPTION
-  Commands: (no args) interactive menu, install, doctor, scan, harden, agent,
+  Commands: (no args) interactive menu, install, doctor, scan, fix, harden, agent,
   mcp, audit, enforce, reminders, startup, help.
 .EXAMPLE
   ./seckit.ps1 doctor
@@ -284,6 +284,7 @@ seckit - a small, portable security kit you carry between machines.
   seckit install         install any missing scanners (scoop / pipx / npm)
   seckit doctor          check that the scanners are installed
   seckit scan [DIR]      sweep repos for vuln deps, code/IaC flaws, malware, secrets
+  seckit fix [DIR]       apply safe (same-major) npm fixes (-DryRun, -Install)
   seckit harden [DIR]    drop pre-commit + gitleaks + repo posture files
   seckit agent <sub>     install the SecKit agent prompt for Claude/Copilot/Cursor
   seckit mcp <sub>       manage MCP servers (security + enterprise packs)
@@ -306,6 +307,7 @@ function Invoke-Menu {
     Write-Host '  1) doctor      check your tools are installed'
     Write-Host '  2) install     install any missing scanners'
     Write-Host '  3) scan        sweep repos for trouble'
+    Write-Host '  f) fix         apply safe (same-major) npm vulnerability fixes'
     Write-Host '  4) harden      drop pre-commit + gitleaks + posture files in a repo'
     Write-Host '  5) agent       install the SecKit AI-agent prompt'
     Write-Host '  6) mcp         manage MCP servers (security + enterprise)'
@@ -323,6 +325,15 @@ function Invoke-Menu {
         if ($dir -notin 'b', 'back') {
           if (-not $dir) { $dir = Join-Path $HOME 'Git' }
           & (Join-Path $Here 'scan_repos.ps1') $dir
+        }
+      }
+      { $_ -in 'f', 'fix' } {
+        $dir = Read-Host 'Directory to fix [.] (b to back)'
+        if ($dir -notin 'b', 'back') {
+          if (-not $dir) { $dir = '.' }
+          $fy = Read-Host 'Dry run first? [Y/n]'
+          if ($fy -in 'n', 'N') { & (Join-Path $Here 'fix_deps.ps1') $dir }
+          else { & (Join-Path $Here 'fix_deps.ps1') $dir -DryRun }
         }
       }
       { $_ -in '4', 'harden' } {
@@ -417,6 +428,16 @@ switch ($Command) {
       else { $scanArgs.Root = $tok }
     }
     & (Join-Path $Here 'scan_repos.ps1') @scanArgs
+  }
+  'fix' {
+    $fixArgs = @{}
+    foreach ($tok in @($Rest)) {
+      if ("$tok" -in '-DryRun', '--dry-run') { $fixArgs.DryRun = $true }
+      elseif ("$tok" -in '-Install', '--install') { $fixArgs.Install = $true }
+      elseif ($tok) { $fixArgs.Root = "$tok" }
+    }
+    & (Join-Path $Here 'fix_deps.ps1') @fixArgs
+    exit $LASTEXITCODE
   }
   'harden'  {
     $repo = if ($Rest.Count -gt 0) { [string]$Rest[0] } else { '.' }

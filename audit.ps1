@@ -93,6 +93,15 @@ function Test-GitHubRepoPolicy($Owner, $Repo) {
   $vaEnabled = $LASTEXITCODE -eq 0
   Add-Result 'required' 'security.vulnerability_alerts' 'enabled' $(if ($vaEnabled) {'enabled'} else {'disabled'}) $(if ($vaEnabled) {'pass'} else {'fail'})
 
+  # Dependabot security updates (automatic fix PRs): {"enabled":bool,"paused":bool}.
+  $asfState = 'unknown'
+  try {
+    $asf = (& gh api "repos/$Owner/$Repo/automated-security-fixes" 2>$null) | ConvertFrom-Json
+    if ($asf.enabled -eq $true) { $asfState = if ($asf.paused -eq $true) { 'paused' } else { 'enabled' } }
+    elseif ($asf.enabled -eq $false) { $asfState = 'disabled' }
+  } catch { $asfState = 'unknown' }
+  Decide 'required' 'security.dependabot_security_updates' 'enabled' $asfState
+
   $sa = $repoObj.security_and_analysis
   $secScan   = if ($sa -and $sa.secret_scanning)                    { $sa.secret_scanning.status }                    else { 'unknown' }
   $pushProt  = if ($sa -and $sa.secret_scanning_push_protection)    { $sa.secret_scanning_push_protection.status }    else { 'unknown' }

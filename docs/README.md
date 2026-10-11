@@ -177,6 +177,22 @@ Global level writes `~/.config/git/ignore`, sets `git config --global
 core.excludesfile` (only if unset), and adds Claude deny rules to
 `~/.claude/settings.json` (or `~/.claude/settings.seckit.json` to merge).
 
+## Fix vulnerable dependencies
+
+```bash
+seckit fix . --dry-run     # preview: before/after counts, versions that would change
+seckit fix .               # rewrite package-lock.json only (no scripts, no node_modules)
+seckit fix . --install     # also update node_modules (still --ignore-scripts)
+```
+
+Scope is npm (`package-lock.json`); other lockfiles are listed as not supported
+yet. Only same-major updates are applied: `osv-scanner fix` first when
+installed, `npm audit fix --package-lock-only --ignore-scripts` after it (and
+as the fallback when osv-scanner fails). Anything that needs a major upgrade is
+listed with its current and fixed version. SecKit never commits, pushes or
+branches; review the diff, run `npm ci --ignore-scripts` and your tests, then
+commit. Exit code is 1 while any high/critical vulnerability remains.
+
 ## Audit a remote repo or org
 
 `seckit audit` is the read-only posture check. It calls `gh` for GitHub and `az
@@ -204,7 +220,8 @@ every call is a `GET`.
 `seckit enforce` writes the settings flagged by `audit`. It is dry-run by
 default and prints every command it would run; pass `--apply` (Bash) or
 `-Apply` (PowerShell) to actually write. It enables branch protection on the
-default branch, turns on vulnerability alerts + secret scanning + push
+default branch, turns on vulnerability alerts + Dependabot security updates +
+secret scanning + push
 protection + private vulnerability reporting, clamps workflow permissions to
 read-only with no PR approval, and drops any missing `SECURITY.md`,
 `CODEOWNERS`, dependabot, CodeQL or PR template files into the cwd.
@@ -322,6 +339,7 @@ The log is written to `~/.seckit/logs/debug-<timestamp>.log` and captures `set -
 | `seckit.sh` / `seckit.ps1` | the dispatcher |
 | `scan_repos.sh` / `scan_repos.ps1` | the repo scanner |
 | `mcp.sh` / `mcp.ps1` | the MCP server manager |
+| `fix_deps.sh` / `fix_deps.ps1` | safe (same-major) npm vulnerability fixes |
 | `audit.sh` / `audit.ps1` | the read-only GitHub / ADO posture audit |
 | `enforce.sh` / `enforce.ps1` | writes the settings flagged by `audit` |
 | `banner.sh` | the animated startup banner |

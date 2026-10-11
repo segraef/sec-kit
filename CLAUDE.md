@@ -31,7 +31,7 @@ These rules apply to AI coding agents working in this repository
 ## Before you commit (definition of green)
 - Run `bash check.sh` and make it print `RESULT: green` before committing or
   reporting work as done. It runs the same gates CI enforces: bash syntax,
-  `shellcheck` (banner.sh, seckit.sh, scan_repos.sh, scan_skill.sh, check.sh),
+  `shellcheck` (banner.sh, seckit.sh, scan_repos.sh, scan_skill.sh, fix_deps.sh, check.sh),
   `PSScriptAnalyzer` (all `*.ps1`, recursive), and YAML parse of the CI files.
 - A red `check.sh` means a red PR. Fix it; do not hand work back while it fails.
 - Keep the shellcheck file list in `check.sh` and `.github/workflows/ci.yml` in
