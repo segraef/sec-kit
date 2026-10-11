@@ -10,6 +10,20 @@ From v0.1.0 onward this file is generated automatically by
 [Conventional Commits](https://www.conventionalcommits.org/). Do not edit
 released sections by hand; write a good commit message instead.
 
+## [0.1.5](https://github.com/segraef/sec-kit/compare/v0.1.4...v0.1.5) (2026-10-11)
+
+
+### Added
+
+* add seckit fix for safe npm vulnerability fixes ([c19e0ff](https://github.com/segraef/sec-kit/commit/c19e0ff0e1716cec4b9751a90459239e3908e9b2))
+* seckit fix command + audit check for Dependabot security updates ([373275a](https://github.com/segraef/sec-kit/commit/373275acb0a4d2ffe2002e7494213d8e30fea4b5))
+
+
+### Fixed
+
+* **audit:** check Dependabot security updates are enabled ([58d1ea2](https://github.com/segraef/sec-kit/commit/58d1ea2ff733d2f64de057f5439e9706f6af95c7))
+* **fix:** fail closed when npm audit fails or a lockfile is skipped ([699b14e](https://github.com/segraef/sec-kit/commit/699b14eee0b1de0ac8b6c8dba3b0c2ff94e7bd1e))
+
 ## [0.1.4](https://github.com/segraef/sec-kit/compare/v0.1.3...v0.1.4) (2026-09-05)
 
 
